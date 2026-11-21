@@ -18,6 +18,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
 
 
 class ComfortTime(HybridEntity, TimeEntity):
+    _platform_domain = "time"
     def __init__(self, ctrl, key: str) -> None:
         super().__init__(ctrl, key)
         self._key = key

@@ -46,7 +46,7 @@ class HybridHeatingController:
         self.model = LearningModel()
         self.planner = Planner()
         self.learner = Learner(self.model)
-        self.decision: Decision = Decision(STRAT_OFF, "off", None, "opstarten")
+        self.decision: Decision = Decision(STRAT_OFF, "off", None, "off")
         self.t_in: float | None = None
         self.t_out: float | None = None
         self._listeners: list[Callable[[], None]] = []
@@ -56,12 +56,21 @@ class HybridHeatingController:
         self._expected: dict[str, tuple] = {}
         self.override_until: datetime | None = None
         self.override_entity: str | None = None
+        # cumulative heating costs in EUR (for statistics graphs)
+        self.costs: dict = {"airco": 0.0, "cv": 0.0}
+        self._prev_meter: tuple | None = None
+        self.day_start: dict = {"date": None, "airco": 0.0, "cv": 0.0}
 
     # ---- lifecycle ----------------------------------------------------
     async def async_setup(self) -> None:
         data = await self._store.async_load() or {}
         self.settings.update(data.get("settings", {}))
         self.model.data = data.get("model", {})
+        self.costs.update(data.get("costs", {}))
+        self.day_start.update(data.get("day_start", {}))
+        # prices live in settings (number entities); seed from older options
+        for key in (CONF_PRICE_KWH, CONF_PRICE_GAS):
+            self.settings.setdefault(key, float(self.conf[key]))
 
     @callback
     def async_start(self) -> None:
@@ -76,7 +85,8 @@ class HybridHeatingController:
         await self._store.async_save(self._data())
 
     def _data(self) -> dict:
-        return {"settings": self.settings, "model": self.model.data}
+        return {"settings": self.settings, "model": self.model.data, "costs": self.costs,
+                "day_start": self.day_start}
 
     def _save(self) -> None:
         self._store.async_delay_save(self._data, 30)
@@ -161,7 +171,13 @@ class HybridHeatingController:
 
     @property
     def prices(self) -> Prices:
-        return Prices(float(self.conf[CONF_PRICE_KWH]), float(self.conf[CONF_PRICE_GAS]))
+        s = self.settings
+        return Prices(float(s.get(CONF_PRICE_KWH, self.conf[CONF_PRICE_KWH])),
+                      float(s.get(CONF_PRICE_GAS, self.conf[CONF_PRICE_GAS])))
+
+    def cost_today(self, which: str) -> float:
+        keys = ("airco", "cv") if which == "total" else (which,)
+        return sum(self.costs[k] - self.day_start.get(k, 0.0) for k in keys)
 
     # ---- main loop ----------------------------------------------------
     async def _async_tick(self, _now: datetime | None = None) -> None:
@@ -191,7 +207,7 @@ class HybridHeatingController:
                 if minutes > 0:
                     self.override_until = now + timedelta(minutes=minutes)
                     self.override_entity = entity
-                    _LOGGER.info("Handmatige bediening op %s: module pauzeert tot %s",
+                    _LOGGER.info("Manual change on %s: pausing control until %s",
                                  entity, self.override_until)
         if self.override_until and now >= self.override_until:
             self._clear_override()
@@ -202,12 +218,11 @@ class HybridHeatingController:
         else:
             self.planner._off("")
             self._expected.clear()
-            reason = ("alleen leren" if s["mode"] == MODE_OFF
-                      else f"handmatig bediend tot {self.override_until:%H:%M}")
+            reason = "learn_only" if s["mode"] == MODE_OFF else "manual_override"
             self.decision = self._observe(reason, float(c[CONF_HYSTERESIS]))
         d = self.decision
         if (d.strategy, d.phase) != (prev.strategy, prev.phase):
-            _LOGGER.info("Strategie %s / fase %s (%s)", d.strategy, d.phase, d.reason)
+            _LOGGER.info("Strategy %s / phase %s (%s)", d.strategy, d.phase, d.reason)
 
         dhw = False
         if c.get(CONF_DHW):
@@ -216,12 +231,33 @@ class HybridHeatingController:
         kwh = self._float(CONF_AIRCO_ENERGY)
         m3 = self._float(CONF_GAS)
         if self.learner.tick(now, d, self.t_in, self.t_out, kwh, m3, dhw):
-            _LOGGER.debug("Geleerd: %s", self.learner.last_event)
+            _LOGGER.debug("Learned: %s", self.learner.last_event)
             self._save()
+        self._track_costs(kwh, m3, dhw)
 
         if controlling and d.strategy != STRAT_OFF:
             await self._apply(d)
         self._notify()
+
+    def _track_costs(self, kwh: float | None, m3: float | None, dhw: bool) -> None:
+        """Accumulate airco electricity and heating gas (hot water excluded) in EUR."""
+        today = dt_util.now().date().isoformat()
+        if self.day_start.get("date") != today:
+            self.day_start = {"date": today, **{k: v for k, v in self.costs.items()}}
+            self._save()
+        if kwh is None or m3 is None:
+            return
+        prev, self._prev_meter = self._prev_meter, (kwh, m3)
+        if prev is None:
+            return
+        d_kwh, d_m3 = kwh - prev[0], m3 - prev[1]
+        p = self.prices
+        if 0 <= d_kwh < 5:
+            self.costs["airco"] += d_kwh * p.kwh
+        if 0 <= d_m3 < 2 and not dhw:
+            self.costs["cv"] += d_m3 * p.gas
+        if d_kwh > 0 or d_m3 > 0:
+            self._save()
 
     def _detect_override(self) -> str | None:
         """Return entity_id whose state no longer matches what we set (remote, app, dial)."""
@@ -321,7 +357,7 @@ class HybridHeatingController:
                         {"entity_id": entity_id, "temperature": temp}, blocking=True)
                     sent = True
         except (HomeAssistantError, ValueError) as err:
-            _LOGGER.warning("Aansturen %s mislukt: %s", entity_id, err)
+            _LOGGER.warning("Controlling %s failed: %s", entity_id, err)
             return
         if sent:
             self._last_cmd[entity_id] = (cmd, now)

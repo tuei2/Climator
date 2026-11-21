@@ -23,6 +23,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
 
 
 class HybridClimate(HybridEntity, ClimateEntity):
+    _platform_domain = "climate"
     _attr_name = None
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
     _attr_supported_features = (

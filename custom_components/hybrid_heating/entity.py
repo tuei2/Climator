@@ -12,11 +12,15 @@ from .controller import HybridHeatingController
 class HybridEntity(Entity):
     _attr_has_entity_name = True
     _attr_should_poll = False
+    _platform_domain: str = ""
 
     def __init__(self, ctrl: HybridHeatingController, key: str) -> None:
         self.ctrl = ctrl
         self._attr_unique_id = f"{ctrl.entry.entry_id}_{key}"
         self._attr_translation_key = key
+        # Stable, language-independent entity_ids (e.g. sensor.climator_strategy)
+        object_id = "climator" if key == "climate" else f"climator_{key}"
+        self.entity_id = f"{self._platform_domain}.{object_id}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, ctrl.entry.entry_id)},
             name=ctrl.entry.title,

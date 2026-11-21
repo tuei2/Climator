@@ -23,6 +23,9 @@ PHASE_HEAT = "heat_up"
 PHASE_MAINTAIN = "maintain"
 PHASE_OFF = "off"
 
+REASONS = ["off", "sensor_unavailable", "no_source", "comfort", "eco", "preheat",
+           "manual", "learn_only", "manual_override"]
+
 BIN_EDGES = [-5.0, 0.0, 5.0, 10.0, 15.0]
 BIN_LABELS = ["<-5", "-5..0", "0..5", "5..10", "10..15", ">15"]
 
@@ -277,11 +280,11 @@ class Planner:
 
     def decide(self, i: Inputs, model: LearningModel) -> Decision:
         if i.mode == "off":
-            return self._off("module uit")
+            return self._off("off")
         if i.t_in is None or i.t_out is None:
-            return self._off("sensor onbeschikbaar")
+            return self._off("sensor_unavailable")
         if not i.strategies:
-            return self._off("geen bron beschikbaar")
+            return self._off("no_source")
 
         now = i.now
         deadline = None
@@ -292,15 +295,15 @@ class Planner:
             if in_window(now.time(), i.comfort_start, i.comfort_end):
                 target = i.comfort_temp
                 self.preheat_deadline = None
-                reason = "comfortperiode"
+                reason = "comfort"
             else:
                 target = i.eco_temp
-                reason = "ecoperiode"
+                reason = "eco"
                 nxt = next_start(now, i.comfort_start)
                 if self.preheat_deadline and now < self.preheat_deadline:
                     target, deadline = i.comfort_temp, self.preheat_deadline
                     preheat_start = None
-                    reason = "voorverwarmen"
+                    reason = "preheat"
                 else:
                     self.preheat_deadline = None
                     if i.comfort_temp > i.t_in:
@@ -313,10 +316,10 @@ class Planner:
                         if now >= preheat_start:
                             self.preheat_deadline = nxt
                             target, deadline = i.comfort_temp, nxt
-                            reason = "voorverwarmen"
+                            reason = "preheat"
         else:
             target = i.manual_target
-            reason = "handmatig"
+            reason = "manual"
 
         # Phase with hysteresis
         if self.phase == PHASE_HEAT:
@@ -422,7 +425,7 @@ class Learner:
             if stable and d_k >= 2:
                 self.model.update_maint(d.strategy, t_out_avg,
                                         d_kwh / hours / d_k, d_m3 / hours / d_k)
-                event = f"onderhouden {d.strategy}"
+                event = f"maintain {d.strategy}"
             self.win = _Window(key, now, t_in, kwh, m3, [t_out])
 
         if event:
@@ -440,5 +443,5 @@ class Learner:
             return None
         t_out_avg = sum(w.t_outs) / len(w.t_outs)
         self.model.update_heat(strategy, t_out_avg, d_t / hours, d_kwh / d_t, d_m3 / d_t)
-        self.last_event = f"opwarmen {strategy}: {d_t / hours:.2f} °C/u"
+        self.last_event = f"heat-up {strategy}: {d_t / hours:.2f} °C/h"
         return self.last_event

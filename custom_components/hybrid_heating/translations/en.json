@@ -3,20 +3,21 @@
     "step": {
       "user": {
         "title": "Climator",
+        "description": "Choose the entities Climator uses. Energy prices can be set afterwards on the device page.",
         "data": {
           "name": "Name",
           "room_sensor": "Room temperature (source)",
           "outdoor_sensor": "Outdoor temperature",
-          "airco_climate": "Airco (climate)",
+          "airco_climate": "Air conditioner (climate)",
           "cv_climate": "Boiler thermostat (climate)",
-          "airco_energy_sensor": "Airco energy (kWh, total increasing)",
+          "airco_energy_sensor": "Air conditioner energy (kWh, total increasing)",
           "gas_sensor": "Gas meter (m³, total increasing)",
           "dhw_sensor": "Hot water active (optional)"
         }
       }
     },
     "error": {
-      "same_climate": "Airco and boiler must be different entities"
+      "same_climate": "Air conditioner and boiler must be different entities"
     }
   },
   "options": {
@@ -26,29 +27,27 @@
         "data": {
           "room_sensor": "Room temperature (source)",
           "outdoor_sensor": "Outdoor temperature",
-          "airco_climate": "Airco (climate)",
+          "airco_climate": "Air conditioner (climate)",
           "cv_climate": "Boiler thermostat (climate)",
-          "airco_energy_sensor": "Airco energy (kWh, total increasing)",
+          "airco_energy_sensor": "Air conditioner energy (kWh, total increasing)",
           "gas_sensor": "Gas meter (m³, total increasing)",
           "dhw_sensor": "Hot water active (optional)",
-          "price_kwh": "Electricity price per kWh",
-          "price_gas": "Gas price per m³",
-          "airco_offset": "Airco setpoint offset",
+          "airco_offset": "Air conditioner setpoint offset",
           "cv_offset": "Boiler setpoint offset",
           "cv_setback": "Boiler setpoint when inactive",
-          "airco_min_outdoor": "Don't use airco below outdoor temp",
-          "allow_both": "Allow both simultaneously",
-          "max_heatup_minutes": "Max heat-up time for manual change",
+          "airco_min_outdoor": "Don't use air conditioner below outdoor temperature",
+          "allow_both": "Allow both at the same time",
+          "max_heatup_minutes": "Max heat-up time after manual change",
           "max_preheat_minutes": "Max preheat time",
           "preheat_margin_minutes": "Preheat margin",
           "min_switch_minutes": "Min. time between source switches",
           "hysteresis": "Hysteresis",
-          "override_minutes": "Pause after manual override (0 = module overrides)"
+          "override_minutes": "Pause after manual change (0 = Climator overrides)"
         }
       }
     },
     "error": {
-      "same_climate": "Airco and boiler must be different entities"
+      "same_climate": "Air conditioner and boiler must be different entities"
     }
   },
   "entity": {
@@ -56,8 +55,8 @@
       "strategy": {
         "name": "Strategy",
         "state": {
-          "airco": "Airco",
-          "cv": "CV",
+          "airco": "Air conditioner",
+          "cv": "Boiler",
           "both": "Both",
           "off": "Off"
         }
@@ -70,14 +69,64 @@
           "off": "Off"
         }
       },
+      "reason": {
+        "name": "Reason",
+        "state": {
+          "off": "Off",
+          "sensor_unavailable": "Sensor unavailable",
+          "no_source": "No heat source available",
+          "comfort": "Comfort period",
+          "eco": "Eco period",
+          "preheat": "Preheating",
+          "manual": "Manual temperature",
+          "learn_only": "Learn only",
+          "manual_override": "Paused: manual change"
+        }
+      },
       "preheat_start": {
         "name": "Preheat start"
       },
       "maintain_cost_airco": {
-        "name": "Maintain cost airco"
+        "name": "Maintain cost air conditioner"
       },
       "maintain_cost_cv": {
         "name": "Maintain cost boiler"
+      },
+      "cost_airco": {
+        "name": "Heating cost air conditioner (total)"
+      },
+      "cost_cv": {
+        "name": "Heating cost boiler (total)"
+      },
+      "cost_total": {
+        "name": "Heating cost (total)"
+      },
+      "cost_today_airco": {
+        "name": "Heating cost air conditioner today"
+      },
+      "cost_today_cv": {
+        "name": "Heating cost boiler today"
+      },
+      "cost_today_total": {
+        "name": "Heating cost today"
+      },
+      "heat_rate_airco": {
+        "name": "Heat-up rate air conditioner"
+      },
+      "heat_rate_cv": {
+        "name": "Heat-up rate boiler"
+      },
+      "heat_rate_both": {
+        "name": "Heat-up rate both"
+      },
+      "heat_cost_airco": {
+        "name": "Heat-up cost per °C air conditioner"
+      },
+      "heat_cost_cv": {
+        "name": "Heat-up cost per °C boiler"
+      },
+      "heat_cost_both": {
+        "name": "Heat-up cost per °C both"
       },
       "learning": {
         "name": "Learning data"
@@ -89,6 +138,12 @@
       },
       "eco_temp": {
         "name": "Eco temperature"
+      },
+      "price_kwh": {
+        "name": "Electricity price"
+      },
+      "price_gas": {
+        "name": "Gas price"
       }
     },
     "time": {
@@ -97,6 +152,16 @@
       },
       "comfort_end": {
         "name": "Comfort until"
+      }
+    },
+    "select": {
+      "mode": {
+        "name": "Mode",
+        "state": {
+          "learn_only": "Learn only",
+          "manual": "Manual temperature",
+          "schedule": "Schedule + preheat"
+        }
       }
     }
   },

@@ -1,4 +1,4 @@
-"""Hybrid Heating: cost-optimised control of an airco + CV thermostat."""
+"""Climator: cost-optimised control of an airco (heat pump) + gas boiler thermostat."""
 
 from __future__ import annotations
 
@@ -9,7 +9,9 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from .const import DOMAIN
 from .controller import HybridHeatingController
 
-PLATFORMS = [Platform.CLIMATE, Platform.SENSOR, Platform.NUMBER, Platform.TIME]
+PLATFORMS = [
+    Platform.CLIMATE, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.TIME,
+]
 
 type HybridConfigEntry = ConfigEntry[HybridHeatingController]
 

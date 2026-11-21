@@ -14,7 +14,7 @@ from .const import (
     CONF_AIRCO, CONF_AIRCO_ENERGY, CONF_AIRCO_MIN_OUTDOOR, CONF_AIRCO_OFFSET,
     CONF_ALLOW_BOTH, CONF_CV, CONF_CV_OFFSET, CONF_CV_SETBACK, CONF_DHW, CONF_GAS,
     CONF_HYSTERESIS, CONF_MAX_HEATUP, CONF_MAX_PREHEAT, CONF_MIN_SWITCH, CONF_NAME,
-    CONF_OUTDOOR_SENSOR, CONF_OVERRIDE_MINUTES, CONF_PREHEAT_MARGIN, CONF_PRICE_GAS, CONF_PRICE_KWH,
+    CONF_OUTDOOR_SENSOR, CONF_OVERRIDE_MINUTES, CONF_PREHEAT_MARGIN,
     CONF_ROOM_SENSOR, DEFAULT_OPTIONS, DOMAIN, ENTITY_KEYS,
 )
 
@@ -51,8 +51,6 @@ def _entity_schema(d: dict) -> dict:
 def _option_schema(o: dict) -> dict:
     g = lambda k: o.get(k, DEFAULT_OPTIONS[k])  # noqa: E731
     return {
-        vol.Required(CONF_PRICE_KWH, default=g(CONF_PRICE_KWH)): _num(0, 2, 0.001, "€/kWh"),
-        vol.Required(CONF_PRICE_GAS, default=g(CONF_PRICE_GAS)): _num(0, 5, 0.001, "€/m³"),
         vol.Required(CONF_AIRCO_OFFSET, default=g(CONF_AIRCO_OFFSET)): _num(-3, 5, 0.5, "°C"),
         vol.Required(CONF_CV_OFFSET, default=g(CONF_CV_OFFSET)): _num(-3, 3, 0.1, "°C"),
         vol.Required(CONF_CV_SETBACK, default=g(CONF_CV_SETBACK)): _num(5, 20, 0.5, "°C"),

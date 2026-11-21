@@ -3,6 +3,7 @@
     "step": {
       "user": {
         "title": "Climator",
+        "description": "Kies de entiteiten die Climator gebruikt. Energieprijzen stel je daarna in op de apparaatpagina.",
         "data": {
           "name": "Naam",
           "room_sensor": "Ruimtetemperatuur (bron)",
@@ -31,19 +32,17 @@
           "airco_energy_sensor": "Energieverbruik airco (kWh, oplopend)",
           "gas_sensor": "Gasmeter (m³, oplopend)",
           "dhw_sensor": "Tapwater actief (optioneel)",
-          "price_kwh": "Stroomprijs per kWh",
-          "price_gas": "Gasprijs per m³",
           "airco_offset": "Airco setpoint-offset",
           "cv_offset": "CV setpoint-offset",
           "cv_setback": "CV-temperatuur als CV niet actief is",
-          "airco_min_outdoor": "Airco niet gebruiken onder buitentemp.",
+          "airco_min_outdoor": "Airco niet gebruiken onder buitentemperatuur",
           "allow_both": "Beide tegelijk mogen gebruiken",
-          "max_heatup_minutes": "Max. opwarmtijd bij handmatige wijziging",
+          "max_heatup_minutes": "Max. opwarmtijd na handmatige wijziging",
           "max_preheat_minutes": "Max. voorverwarmtijd",
           "preheat_margin_minutes": "Marge voorverwarmen",
-          "min_switch_minutes": "Min. tijd tussen wisselen bron",
+          "min_switch_minutes": "Min. tijd tussen wisselen van bron",
           "hysteresis": "Hysterese",
-          "override_minutes": "Pauze na handmatige bediening (0 = module overschrijft)"
+          "override_minutes": "Pauze na handmatige bediening (0 = Climator zet terug)"
         }
       }
     },
@@ -70,6 +69,20 @@
           "off": "Uit"
         }
       },
+      "reason": {
+        "name": "Reden",
+        "state": {
+          "off": "Uit",
+          "sensor_unavailable": "Sensor onbeschikbaar",
+          "no_source": "Geen warmtebron beschikbaar",
+          "comfort": "Comfortperiode",
+          "eco": "Ecoperiode",
+          "preheat": "Voorverwarmen",
+          "manual": "Handmatige temperatuur",
+          "learn_only": "Alleen leren",
+          "manual_override": "Gepauzeerd: handmatig bediend"
+        }
+      },
       "preheat_start": {
         "name": "Start voorverwarmen"
       },
@@ -78,6 +91,42 @@
       },
       "maintain_cost_cv": {
         "name": "Kosten op temp. houden CV"
+      },
+      "cost_airco": {
+        "name": "Stookkosten airco (totaal)"
+      },
+      "cost_cv": {
+        "name": "Stookkosten CV (totaal)"
+      },
+      "cost_total": {
+        "name": "Stookkosten (totaal)"
+      },
+      "cost_today_airco": {
+        "name": "Stookkosten airco vandaag"
+      },
+      "cost_today_cv": {
+        "name": "Stookkosten CV vandaag"
+      },
+      "cost_today_total": {
+        "name": "Stookkosten vandaag"
+      },
+      "heat_rate_airco": {
+        "name": "Opwarmsnelheid airco"
+      },
+      "heat_rate_cv": {
+        "name": "Opwarmsnelheid CV"
+      },
+      "heat_rate_both": {
+        "name": "Opwarmsnelheid beide"
+      },
+      "heat_cost_airco": {
+        "name": "Opwarmkosten per °C airco"
+      },
+      "heat_cost_cv": {
+        "name": "Opwarmkosten per °C CV"
+      },
+      "heat_cost_both": {
+        "name": "Opwarmkosten per °C beide"
       },
       "learning": {
         "name": "Leerdata"
@@ -89,6 +138,12 @@
       },
       "eco_temp": {
         "name": "Ecotemperatuur"
+      },
+      "price_kwh": {
+        "name": "Stroomprijs"
+      },
+      "price_gas": {
+        "name": "Gasprijs"
       }
     },
     "time": {
@@ -97,6 +152,16 @@
       },
       "comfort_end": {
         "name": "Comfort tot"
+      }
+    },
+    "select": {
+      "mode": {
+        "name": "Modus",
+        "state": {
+          "learn_only": "Alleen leren",
+          "manual": "Vaste temperatuur",
+          "schedule": "Schema + voorverwarmen"
+        }
       }
     }
   },

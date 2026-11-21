@@ -1,64 +1,88 @@
-# Climator – hybride verwarming voor Home Assistant
+# Climator
 
-Stuurt een airco (warmtepomp) en een CV-thermostaat samen aan op de laagste kosten.
-Leert zelf hoe snel en tegen welke kosten elke bron opwarmt, per buitentemperatuur,
-en warmt vooraf op zodat het op de ingestelde tijd warm is.
+Cost-optimised hybrid heating for Home Assistant: combines an air conditioner (air-to-air
+heat pump) with a gas boiler thermostat. Climator learns how fast and at what cost each
+source heats your room, per outdoor temperature, picks the cheapest way to heat up and to
+keep the room warm, and preheats so the room is warm at the time you set.
 
-## Installatie
-1. HACS → ⋮ → *Custom repositories* → `https://github.com/tuei2/Climator`, type *Integration* → installeren.
-   (Of handmatig: kopieer `custom_components/hybrid_heating` naar `/config/custom_components/`.)
-2. Herstart Home Assistant.
-3. Instellingen → Apparaten & diensten → Integratie toevoegen → **Climator**.
+Works with any `climate` entity (tested with a Daikin + Faikin and a Plugwise Anna).
+The integration UI is available in **English and Dutch**.
 
-## Wat je kiest bij het instellen
-| Veld | Voorbeeld |
+## Installation (HACS)
+1. HACS → ⋮ → *Custom repositories* → `https://github.com/tuei2/Climator`, type *Integration*.
+2. Install **Climator** and restart Home Assistant.
+3. Settings → Devices & services → *Add integration* → **Climator**.
+
+## Setup
+| Field | Example |
 |---|---|
-| Ruimtetemperatuur (bron) | elke temperatuursensor in de kamer |
-| Buitentemperatuur | je buitensensor |
-| Airco | `climate.<faikin>` |
-| CV-thermostaat | `climate.anna` |
-| Energie airco (kWh, oplopend) | Faikin-energiesensor of een *Integraal*-helper op het vermogen |
-| Gasmeter (m³, oplopend) | P1/DSMR gasmeterstand |
-| Tapwater actief (optioneel) | Plugwise `binary_sensor …dhw_state` – sluit douchegas uit van het leren |
+| Room temperature (source) | any temperature sensor in the room |
+| Outdoor temperature | your outdoor sensor |
+| Air conditioner | `climate.<faikin>` |
+| Boiler thermostat | `climate.anna` |
+| Air conditioner energy (kWh, total increasing) | Faikin energy sensor, or an *Integral* helper on its power |
+| Gas meter (m³, total increasing) | P1/DSMR gas meter reading |
+| Hot water active (optional) | Plugwise `binary_sensor …dhw_state` — excludes shower gas from learning and costs |
 
-Prijzen, offsets enz. pas je later aan via **Configureren** op de integratie.
+Advanced settings (offsets, setback temperature, pause after manual change, …) are under
+**Configure** on the integration.
 
-## Entiteiten
-- `climate.<naam>` – **Uit** (module stuurt niets, maar leert wel mee), **Verwarmen** (vaste temperatuur), **Auto** (schema + voorverwarmen).
-- `number` Comfort- en Ecotemperatuur, `time` Comfort vanaf / tot.
-- `sensor` Strategie (airco / cv / beide), Fase, Start voorverwarmen, kosten per uur per bron, Leerdata (diagnostisch, met alle geleerde waarden per buitentemperatuur).
-- Dienst `hybrid_heating.reset_learning` wist de leerdata.
+## Entities
+All entities have fixed ids starting with `climator_`, independent of language.
 
-## Hoe beslist hij
-- **Opwarmen**: per bron (airco, CV, beide) wordt duur en kosten berekend uit de geleerde
-  °C/uur en kWh of m³ per °C. De goedkoopste optie die op tijd klaar is wint; lukt dat niet, dan de snelste.
-- **Op temperatuur houden**: de bron met de laagste kosten per uur
-  (verbruik per uur per graad verschil tussen binnen en buiten × prijs).
-- **Voorverwarmen** (Auto): starttijd = comfort-start − verwachte opwarmtijd − marge.
-- De niet-actieve airco gaat **uit**, de niet-actieve CV gaat naar de *setback*-temperatuur (standaard 15 °C).
-- Airco krijgt doel + offset (standaard +1 °C, omdat de unit op eigen hoogte meet).
+| Entity | Purpose |
+|---|---|
+| `climate.climator` | Off = learn only, Heat = fixed temperature, Auto = schedule + preheat |
+| `select.climator_mode` | Same modes: *Learn only*, *Manual temperature*, *Schedule + preheat* |
+| `number.climator_price_kwh`, `number.climator_price_gas` | **Energy prices** used for every decision |
+| `number.climator_comfort_temp`, `number.climator_eco_temp` | Schedule temperatures |
+| `time.climator_comfort_start`, `time.climator_comfort_end` | Comfort period |
+| `sensor.climator_strategy` / `_phase` / `_reason` | What Climator is doing and why |
+| `sensor.climator_preheat_start` | When preheating starts |
+| `sensor.climator_cost_today_*` | Heating cost since midnight (air conditioner, boiler, total) |
+| `sensor.climator_cost_*` | Cumulative heating cost (long-term statistics: per day/week/month) |
+| `sensor.climator_heat_rate_*` | Learned heat-up rate (°C/h) at the current outdoor temperature |
+| `sensor.climator_heat_cost_*` | Learned cost to heat up 1 °C |
+| `sensor.climator_maintain_cost_*` | Cost per hour to keep the room at temperature |
+| `sensor.climator_learning` | Number of learned samples; attribute `table` holds all learned data |
 
-## Alleen leren
-Zet de module op **Uit**. Hij stuurt dan niets aan, maar kijkt wat de airco en Anna doen
-(aan/uit, setpoint) en leert daarvan. Zo kun je eerst een week gewoon stoken zoals je gewend bent
-en daarna pas *Auto* aanzetten met al geleerde waarden.
+Service `hybrid_heating.reset_learning` clears the learned data.
 
-## Afstandsbediening / Anna-knop / app
-Verander je zelf iets aan de airco of Anna terwijl de module stuurt, dan ziet hij dat
-(na 2 minuten) en **pauzeert** hij (standaard 120 minuten, instelbaar via *Configureren*;
-0 = de module zet het terug). Tijdens de pauze leert hij mee. Daarna, of zodra je in de module
-zelf de temperatuur of modus wijzigt, neemt hij het weer over. De `climate`-entiteit toont
-`override_until`.
+## Dashboard
+[`dashboards/climator.yaml`](dashboards/climator.yaml) contains a ready-made dashboard with
+three views: **Status**, **Costs** (cost per day and per month) and **Learning** (learned
+rates, costs and a table per outdoor temperature). Create a new dashboard, open the
+*Raw configuration editor* and paste the file.
 
-## Goed om te weten
-- **Plugwise Anna**: de module zet de Anna op *heat* (handmatig). Daarmee staat het Anna-schema uit;
-  het schema loopt via deze module. Zet de module op *Uit* en de Anna terug op *auto* om terug te gaan.
-- **Leren** gebeurt in meetvensters (opwarmen 15–45 min, onderhouden 60 min). Na een paar
-  dagen per buitentemperatuur-band worden de keuzes nauwkeurig; tot die tijd gebruikt hij redelijke standaardwaarden.
-- **DSMR4-meters** geven het gas maar eens per uur door; opwarmmetingen met gas zijn dan grof.
-  DSMR5 (elke 5 minuten) werkt prima.
-- Alles draait lokaal; logboek: `custom_components.hybrid_heating`.
+## Learn only
+Set the mode to **Learn only** (or turn `climate.climator` off). Climator then controls
+nothing, but watches what the air conditioner and boiler do and learns from it. Run it like
+this for a week, then switch to *Schedule + preheat*.
 
-## Nieuwe versie uitbrengen
-Verhoog `version` in `custom_components/hybrid_heating/manifest.json` en push naar `main`.
-De workflow maakt automatisch een release `vX.Y.Z`; HACS toont daarna een update.
+## Manual changes (remote, thermostat dial, app)
+When you change the air conditioner or boiler yourself while Climator is in control, it
+detects this after about 2 minutes and pauses (default 120 minutes, configurable; 0 = Climator
+reverts your change). It keeps learning during the pause. Changing Climator's own mode or
+temperature ends the pause immediately.
+
+## How decisions are made
+- **Heating up**: for each option (air conditioner, boiler, both) duration and cost are
+  calculated from the learned °C/h and kWh or m³ per °C. The cheapest option that is ready in
+  time wins; otherwise the fastest.
+- **Keeping warm**: the source with the lowest cost per hour
+  (consumption per hour per degree of indoor/outdoor difference × price).
+- **Preheating** (schedule): start = comfort start − expected heat-up time − margin.
+- The inactive air conditioner is switched off; the inactive boiler gets the setback
+  temperature (default 15 °C).
+
+## Notes
+- **Plugwise Anna**: while Climator is in control it sets the Anna to *heat* (manual), which
+  disables the Anna's own schedule. In *Learn only* mode nothing is changed.
+- Learning uses measurement windows (heat-up 15–45 min, keeping warm 60 min). Until enough data
+  exists, sensible defaults are used.
+- DSMR4 meters report gas only once per hour; DSMR5 (every 5 minutes) gives better results.
+- Gas costs count all gas except while hot water is active, so cooking gas is included.
+
+## Releasing a new version
+Bump `version` in `custom_components/hybrid_heating/manifest.json` and push to `main`.
+The release workflow creates the GitHub release; HACS then offers the update.

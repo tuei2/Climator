@@ -19,7 +19,7 @@ jobs:
         run: |
           TAG="v${{ steps.v.outputs.version }}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG bestaat al, bump de version in manifest.json voor een update."
+            echo "Release $TAG already exists; bump the version in manifest.json to publish an update."
           else
             gh release create "$TAG" --title "$TAG" --generate-notes
           fi
