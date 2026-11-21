@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 
 from .const import DOMAIN
 from .controller import HybridHeatingController
+from .panel import async_register_panel, async_unregister_panel
 
 PLATFORMS = [
     Platform.CLIMATE, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.TIME,
@@ -30,6 +31,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HybridConfigEntry) -> bo
 
         hass.services.async_register(DOMAIN, "reset_learning", _reset)
 
+    await async_register_panel(hass)
     ctrl.async_start()
     return True
 
@@ -38,6 +40,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: HybridConfigEntry) -> b
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
         await entry.runtime_data.async_shutdown()
+        if not [e for e in hass.config_entries.async_loaded_entries(DOMAIN)
+                if e.entry_id != entry.entry_id]:
+            async_unregister_panel(hass)
     return ok
 
 

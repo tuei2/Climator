@@ -25,6 +25,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
 class HybridClimate(HybridEntity, ClimateEntity):
     _platform_domain = "climate"
     _attr_name = None
+    _unrecorded_attributes = frozenset({"source_entities", "override_entity"})
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
@@ -73,6 +74,13 @@ class HybridClimate(HybridEntity, ClimateEntity):
             "override_until": (self.ctrl.override_until.isoformat()
                                if self.ctrl.override_until else None),
             "override_entity": self.ctrl.override_entity,
+            "outdoor_temperature": self.ctrl.t_out,
+            "source_entities": {
+                "room": self.ctrl.conf.get("room_sensor"),
+                "outdoor": self.ctrl.conf.get("outdoor_sensor"),
+                "airco": self.ctrl.conf.get("airco_climate"),
+                "cv": self.ctrl.conf.get("cv_climate"),
+            },
         }
 
     async def async_set_temperature(self, **kwargs: Any) -> None:

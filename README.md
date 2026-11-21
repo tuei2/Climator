@@ -48,7 +48,20 @@ All entities have fixed ids starting with `climator_`, independent of language.
 
 Service `hybrid_heating.reset_learning` clears the learned data.
 
-## Dashboard
+## Climator panel
+After installation a **Climator** item appears in the sidebar: a dedicated dashboard page
+(English or Dutch, following your Home Assistant language) with four tabs:
+
+- **Status** — room, outdoor, current heat source, preheat time, cost today, and a temperature
+  chart: room, target, outdoor and device setpoints, coloured bands showing which source was
+  heating, and the planned target for the coming hours.
+- **Costs** — heating cost today, yesterday, last 7/30 days, per day (30 days) and per month,
+  split into air conditioner and boiler.
+- **Learning** — cheapest source right now, learned heat-up rate and costs, coverage per
+  outdoor temperature band and the full learned data table.
+- **Settings** — mode, schedule, energy prices and a link to the advanced settings.
+
+## Lovelace dashboard (optional)
 [`dashboards/climator.yaml`](dashboards/climator.yaml) contains a ready-made dashboard with
 three views: **Status**, **Costs** (cost per day and per month) and **Learning** (learned
 rates, costs and a table per outdoor temperature). Create a new dashboard, open the

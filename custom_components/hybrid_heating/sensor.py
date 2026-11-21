@@ -39,6 +39,7 @@ class _Sensor(HybridEntity, SensorEntity):
 
 
 class StrategySensor(_Sensor):
+    _unrecorded_attributes = frozenset({"heat_up_options", "maintain_cost_eur_per_hour"})
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = [STRAT_AIRCO, STRAT_CV, STRAT_BOTH, STRAT_OFF]
 
@@ -200,6 +201,7 @@ class HeatCostSensor(_Sensor):
 
 
 class LearningSensor(_Sensor):
+    _unrecorded_attributes = frozenset({"table", "last_event"})
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.MEASUREMENT
 

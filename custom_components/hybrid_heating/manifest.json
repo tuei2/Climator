@@ -1,14 +1,22 @@
 {
   "domain": "hybrid_heating",
   "name": "Climator",
+  "after_dependencies": [
+    "history",
+    "recorder"
+  ],
   "codeowners": [
     "@tuei2"
   ],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": [
+    "frontend",
+    "http",
+    "panel_custom"
+  ],
   "documentation": "https://github.com/tuei2/Climator",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/tuei2/Climator/issues",
   "requirements": [],
-  "version": "0.3.0"
+  "version": "0.4.0"
 }
