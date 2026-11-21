@@ -98,7 +98,8 @@
           "window_open": "Raam open",
           "away": "Afwezig",
           "vacation": "Vakantie",
-          "buffer": "Warmte bufferen"
+          "buffer": "Warmte bufferen",
+          "night_off": "Nacht: uit"
         }
       },
       "preheat_start": {
@@ -233,6 +234,12 @@
       },
       "feature_fan": {
         "name": "Functie: ventilatorstanden"
+      },
+      "feature_explore": {
+        "name": "Functie: zelf testen"
+      },
+      "feature_night": {
+        "name": "Functie: 's nachts uit"
       }
     }
   },

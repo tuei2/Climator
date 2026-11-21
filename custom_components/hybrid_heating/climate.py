@@ -68,6 +68,7 @@ class HybridClimate(HybridEntity, ClimateEntity):
         return {
             "strategy": d.strategy,
             "fan": d.fan,
+            "exploring": d.exploring,
             "phase": d.phase,
             "reason": d.reason,
             "preheat_start": d.preheat_start.isoformat() if d.preheat_start else None,

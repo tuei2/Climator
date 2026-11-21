@@ -23,7 +23,8 @@ PHASE_OFF = "off"
 PHASE_PAUSED = "paused"
 
 REASONS = ["off", "sensor_unavailable", "no_source", "comfort", "eco", "preheat", "manual",
-           "learn_only", "manual_override", "window_open", "away", "vacation", "buffer"]
+           "learn_only", "manual_override", "window_open", "away", "vacation", "buffer",
+           "night_off"]
 
 INF = float("inf")
 
@@ -40,6 +41,19 @@ def source_price(source: str, prices: Prices) -> float:
 
 def _sources(strategy: str) -> list[str]:
     return [STRAT_AIRCO, STRAT_CV] if strategy == STRAT_BOTH else [strategy]
+
+
+def in_night(now: datetime, night: tuple) -> bool:
+    start, end = night
+    t = now.time()
+    if start == end:
+        return False
+    return start <= t < end if start < end else (t >= start or t < end)
+
+
+def night_end(now: datetime, night: tuple) -> datetime:
+    end = now.replace(hour=night[1].hour, minute=night[1].minute, second=0, microsecond=0)
+    return end if end > now else end + timedelta(days=1)
 
 
 @dataclass
@@ -104,6 +118,9 @@ class Inputs:
     vacation_temp: float = 14.0
     window_open: bool = False
     fan_control: bool = False       # boost fan while heating up, soft fan while keeping warm
+    explore_source: str | None = None  # use this source to learn, if comfort allows
+    night: tuple | None = None      # (start time, end time): everything off, unless preheating
+    night_min: float = 12.0         # frost guard during the night
     buffer_deg: float = 0.0         # 0 = buffering off
     buffer_threshold: float = 0.15
     hysteresis: float = 0.3
@@ -133,6 +150,7 @@ class Decision:
     maintain_costs: dict = field(default_factory=dict)
     next_comfort: tuple | None = None
     fan: str | None = None          # "boost" | "comfort" | None (leave as is)
+    exploring: bool = False
 
 
 class Planner:
@@ -153,7 +171,8 @@ class Planner:
         return Decision(STRAT_OFF, phase, None, reason)
 
     # ---- preheat --------------------------------------------------------
-    def _preheat_plan(self, i: Inputs, model: ThermalModel, start: datetime, temp: float):
+    def _preheat_plan(self, i: Inputs, model: ThermalModel, start: datetime, temp: float,
+                      floor: float | None = None):
         """Best strategy + start time to reach temp at start. Returns (start_dt, option)."""
         best = None
         for s in i.strategies:
@@ -163,7 +182,8 @@ class Planner:
                 begin = start - timedelta(hours=lead + i.preheat_margin_h)
                 wait = max((begin - i.now).total_seconds() / 3600, 0.0)
                 mid = i.now + timedelta(hours=wait / 2)
-                t_begin = model.decay(i.t_in, wait, i.outdoor(mid), floor=min(i.eco_temp, i.t_in))
+                low = floor if floor is not None else i.eco_temp
+                t_begin = model.decay(i.t_in, wait, i.outdoor(mid), floor=min(low, i.t_in))
                 t_out = i.outdoor(begin)
                 dur = model.time_to(t_begin, temp, t_out, model.heat_rate(s, t_out, i.fan_control))
                 if dur is None:
@@ -188,6 +208,19 @@ class Planner:
         opt = best[1]
         return start - timedelta(hours=opt.duration_h + i.preheat_margin_h), opt
 
+    def _wait_or_preheat(self, i: Inputs, model: ThermalModel, nb, low: float, reason: str):
+        """Outside comfort: hold `low`, or preheat in time for the next comfort block nb."""
+        if self.preheat_deadline and i.now < self.preheat_deadline:
+            return self.preheat_temp, "preheat", self.preheat_deadline, None
+        self.preheat_deadline = None
+        if nb and nb[1] > i.t_in:
+            start, _ = self._preheat_plan(i, model, nb[0], nb[1], floor=low)
+            if start and i.now >= start:
+                self.preheat_deadline, self.preheat_temp = nb[0], nb[1]
+                return nb[1], "preheat", nb[0], start
+            return low, reason, None, start
+        return low, reason, None, None
+
     # ---- main -----------------------------------------------------------
     def decide(self, i: Inputs, model: ThermalModel) -> Decision:
         if i.mode == "off":
@@ -201,6 +234,7 @@ class Planner:
 
         now = i.now
         deadline = preheat_start = next_comfort = None
+        night = i.night is not None and in_night(now, i.night)
 
         if i.presence == "vacation":
             target, reason = i.vacation_temp, "vacation"
@@ -209,6 +243,11 @@ class Planner:
             target, reason = i.manual_target, "manual"
             if i.presence == "away":
                 target, reason = min(i.manual_target, i.away_temp), "away"
+            elif night:
+                end = night_end(now, i.night)
+                target, reason, deadline, preheat_start = self._wait_or_preheat(
+                    i, model, (end, i.manual_target), i.night_min, "night_off")
+                next_comfort = (end, i.manual_target)
         else:
             comfort = comfort_at(i.schedule, now)
             if i.presence == "away":
@@ -218,19 +257,21 @@ class Planner:
                 target, reason = comfort, "comfort"
                 self.preheat_deadline = None
             else:
-                target, reason = i.eco_temp, "eco"
                 nb = next_block(i.schedule, now)
                 next_comfort = nb
-                if self.preheat_deadline and now < self.preheat_deadline:
-                    target, deadline, reason = self.preheat_temp, self.preheat_deadline, "preheat"
-                elif nb and nb[1] > i.t_in:
-                    self.preheat_deadline = None
-                    preheat_start, _ = self._preheat_plan(i, model, nb[0], nb[1])
-                    if preheat_start and now >= preheat_start:
-                        self.preheat_deadline, self.preheat_temp = nb[0], nb[1]
-                        target, deadline, reason = nb[1], nb[0], "preheat"
+                if night:
+                    target, reason, deadline, preheat_start = self._wait_or_preheat(
+                        i, model, nb, i.night_min, "night_off")
                 else:
-                    self.preheat_deadline = None
+                    target, reason, deadline, preheat_start = self._wait_or_preheat(
+                        i, model, nb, i.eco_temp, "eco")
+
+        if reason == "night_off" and i.t_in > target + i.hysteresis:
+            # night: airco off, boiler at the frost-guard temperature
+            self.strategy, self.phase = STRAT_OFF, PHASE_OFF
+            self.last_switch = now
+            return Decision(STRAT_OFF, PHASE_OFF, target, reason, preheat_start, None,
+                            next_comfort=next_comfort)
 
         maint = maintain_costs(model, i.strategies, target, i.t_out, i.prices, i.solar)
 
@@ -272,18 +313,27 @@ class Planner:
                     and choice.duration_h > current.duration_h
                     and choice.duration_h > 0.8 * max_h):
                 choice = current
+            exploring = False
+            if i.explore_source:
+                alt = next((o for o in opts if o.strategy == i.explore_source), None)
+                # only if the test source still makes it in time (comfort first)
+                if alt and alt.duration_h <= max_h:
+                    choice, exploring = alt, True
             new_strategy, new_phase = choice.strategy, PHASE_HEAT
         else:
             new_phase = PHASE_MAINTAIN
+            exploring = False
             feasible = {k: v for k, v in maint.items() if v < INF}
-            if feasible:
+            if i.explore_source in feasible:
+                new_strategy, exploring = i.explore_source, True
+            elif feasible:
                 new_strategy = min(feasible, key=feasible.get)
             elif STRAT_BOTH in i.strategies:
                 new_strategy = STRAT_BOTH
             else:
                 new_strategy = min(maint, key=lambda k: model.pmax[k]) if maint else i.strategies[0]
 
-        if (new_phase == self.phase and new_strategy != self.strategy
+        if (not exploring and new_phase == self.phase and new_strategy != self.strategy
                 and self.strategy in i.strategies and self.last_switch
                 and now - self.last_switch < i.min_switch):
             new_strategy = self.strategy
@@ -299,7 +349,7 @@ class Planner:
                     and model.maintain_input(STRAT_AIRCO, target, i.t_out, i.solar) > model.pmax["airco"] * 0.95):
                 fan = "boost"
         return Decision(self.strategy, self.phase, target, reason, preheat_start, deadline,
-                        opts, maint, next_comfort, fan)
+                        opts, maint, next_comfort, fan, exploring and self.strategy == i.explore_source)
 
 
 def forecast(planner: Planner, base: Inputs, model: ThermalModel, hours: float = 72,

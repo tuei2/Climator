@@ -87,13 +87,18 @@ DEFAULT_SETTINGS = {
     "guest": False,
     "fan_boost_mode": None,     # None = pick automatically from the airco's fan modes
     "fan_comfort_mode": None,
+    "explore_budget": 1.0,      # EUR per week that test runs may cost extra
+    "explore_days": 5,          # test a source when it gave no data for this many days
+    "night_start": "23:00",     # night: airco off, boiler at night_min (feature "night")
+    "night_end": "06:00",
+    "night_min": 12.0,
 }
 
 # Optional functions; each can be switched off (switch entity + panel).
-FEATURES = ["fan", "windows", "presence", "forecast", "buffer", "solar", "notifications",
+FEATURES = ["night", "explore", "fan", "windows", "presence", "forecast", "buffer", "solar", "notifications",
             "suggestions"]
-DEFAULT_FEATURES = {f: f != "buffer" for f in FEATURES}
+DEFAULT_FEATURES = {f: f not in ("buffer", "night") for f in FEATURES}
 
 UPDATE_INTERVAL_SECONDS = 60
 STORAGE_VERSION = 1
-VERSION = "0.6.0"
+VERSION = "0.7.0"

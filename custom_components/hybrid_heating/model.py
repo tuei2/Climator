@@ -97,8 +97,9 @@ class Sample:
 
 @dataclass
 class ThermalModel:
-    ata: list = field(default_factory=lambda: [[0.0] * N for _ in range(N)])
-    atb: list = field(default_factory=lambda: [0.0] * N)
+    # least-squares accumulators per kind of sample: each kind only ages when a new sample of
+    # the same kind arrives, so knowledge about a source that is not used is kept
+    groups: dict = field(default_factory=dict)
     n_eff: float = 0.0
     counts: dict = field(default_factory=lambda: {
         "passive": 0.0, "airco": 0.0, "cv": 0.0, "solar": 0.0, "boost": 0.0})
@@ -108,6 +109,7 @@ class ThermalModel:
     excluded: dict = field(default_factory=dict)  # reason -> count
     theta: dict = field(default_factory=lambda: dict(PRIOR))
     clamped: list = field(default_factory=list)
+    last_seen: dict = field(default_factory=dict)  # source -> unix time of last informative sample
 
     def __post_init__(self) -> None:
         self.solve()
@@ -115,20 +117,24 @@ class ThermalModel:
     # ---- persistence ----------------------------------------------------
     def to_dict(self) -> dict:
         return {
-            "ata": self.ata, "atb": self.atb, "n_eff": self.n_eff, "counts": self.counts,
+            "groups": self.groups, "n_eff": self.n_eff, "counts": self.counts,
             "res2": self.res2, "pmax": self.pmax, "excluded": self.excluded,
             "samples": [s.to_list() for s in self.samples],
+            "last_seen": self.last_seen,
         }
 
     @classmethod
     def from_dict(cls, d: dict | None) -> "ThermalModel":
         m = cls()
-        if d and "ata" in d:
-            m.ata, m.atb = d["ata"], d["atb"]
-            n_old = len(m.atb)
-            if n_old < N:  # model grew (new parameter): pad with zeros
-                m.ata = [row + [0.0] * (N - n_old) for row in m.ata] + [[0.0] * N for _ in range(N - n_old)]
-                m.atb = m.atb + [0.0] * (N - n_old)
+        if d and ("groups" in d or "ata" in d):
+            groups = d["groups"] if "groups" in d else {"legacy": {"ata": d["ata"], "atb": d["atb"]}}
+            for g in groups.values():
+                n_old = len(g["atb"])
+                if n_old < N:  # model grew (new parameter): pad with zeros
+                    g["ata"] = [row + [0.0] * (N - n_old) for row in g["ata"]] + \
+                        [[0.0] * N for _ in range(N - n_old)]
+                    g["atb"] = g["atb"] + [0.0] * (N - n_old)
+            m.groups = groups
             m.n_eff = d.get("n_eff", 0.0)
             m.counts.update(d.get("counts", {}))
             m.res2 = d.get("res2", 0.04)
@@ -138,6 +144,7 @@ class ThermalModel:
                 m.pmax["airco_boost"] = max(old_pmax["airco"], DEFAULT_PMAX["airco_boost"])
             m.excluded = d.get("excluded", {})
             m.samples = [Sample.from_list(v) for v in d.get("samples", [])]
+            m.last_seen = d.get("last_seen", {})
         m.solve()
         return m
 
@@ -157,8 +164,13 @@ class ThermalModel:
 
     def solve(self) -> None:
         pa, pb = self._prior()
-        a = [[pa[i][j] + self.ata[i][j] for j in range(N)] for i in range(N)]
-        b = [pb[i] + self.atb[i] for i in range(N)]
+        a = [row[:] for row in pa]
+        b = pb[:]
+        for g in self.groups.values():
+            for i in range(N):
+                b[i] += g["atb"][i]
+                for j in range(N):
+                    a[i][j] += g["ata"][i][j]
         sol = _solve(a, b) or [PRIOR[p] for p in PARAMS]
         self.clamped = []
         theta = {}
@@ -182,23 +194,27 @@ class ThermalModel:
         if not learn:
             return residual
         x = s.features()
+        airco, cv = s.p_airco >= 0.05, s.g_cv >= 0.01
+        sun = s.solar >= 0.1
+        kind = "both" if airco and cv else "airco" if airco else "cv" if cv else "passive"
+        g = self.groups.setdefault(kind, {"ata": [[0.0] * N for _ in range(N)], "atb": [0.0] * N})
+        for name, grp in self.groups.items():
+            if name in (kind, "legacy"):  # this kind ages with its own new data
+                for i in range(N):
+                    grp["atb"][i] *= FORGET
+                    for j in range(N):
+                        grp["ata"][i][j] *= FORGET
         for i in range(N):
-            self.atb[i] = FORGET * self.atb[i] + x[i] * s.slope
+            g["atb"][i] += x[i] * s.slope
             for j in range(N):
-                self.ata[i][j] = FORGET * self.ata[i][j] + x[i] * x[j]
+                g["ata"][i][j] += x[i] * x[j]
         self.n_eff = FORGET * self.n_eff + 1
-        for k in self.counts:
-            self.counts[k] *= FORGET
-        if s.p_airco < 0.05 and s.g_cv < 0.01:
-            self.counts["passive"] += 1
-        if s.p_airco >= 0.05:
-            self.counts["airco"] += 1
-        if s.g_cv >= 0.01:
-            self.counts["cv"] += 1
-        if s.solar >= 0.1:
-            self.counts["solar"] += 1
-        if s.p_airco >= 0.05 and s.boost >= 0.5:
-            self.counts["boost"] += 1
+        flags = {"passive": not airco and not cv, "airco": airco, "cv": cv, "solar": sun,
+                 "boost": airco and s.boost >= 0.5}
+        for k, on in flags.items():
+            if on:
+                self.counts[k] = FORGET * self.counts.get(k, 0.0) + 1
+                self.last_seen[k] = s.t
         self.res2 = 0.98 * self.res2 + 0.02 * residual ** 2
         self.solve()
         return residual

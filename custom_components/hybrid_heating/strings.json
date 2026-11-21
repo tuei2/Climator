@@ -98,7 +98,8 @@
           "window_open": "Window open",
           "away": "Away",
           "vacation": "Vacation",
-          "buffer": "Buffering heat"
+          "buffer": "Buffering heat",
+          "night_off": "Night: off"
         }
       },
       "preheat_start": {
@@ -233,6 +234,12 @@
       },
       "feature_fan": {
         "name": "Function: fan speeds"
+      },
+      "feature_explore": {
+        "name": "Function: self-testing"
+      },
+      "feature_night": {
+        "name": "Function: off at night"
       }
     }
   },

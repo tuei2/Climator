@@ -30,6 +30,7 @@ from .planner import (
     PHASE_HEAT, PHASE_MAINTAIN, PHASE_OFF, STRAT_AIRCO, STRAT_BOTH, STRAT_CV, STRAT_OFF,
     Decision, Inputs, Planner, Prices, forecast, what_if,
 )
+from .schedule import _t as parse_hhmm
 from .schedule import DEFAULT_SCHEDULE, comfort_at, validate
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,6 +43,9 @@ HOME_STATES = ("home", "on", "true")
 WINDOW_LEARN_BLOCK = timedelta(minutes=15)
 FORECAST_REFRESH = timedelta(minutes=30)
 NOTIFY_ID = "climator_{}"
+EXPLORE_MAX = timedelta(minutes=120)
+EXPLORE_SAMPLES = 4             # ~1 hour of useful data ends a test
+EXPLORE_REASONS = ("comfort", "eco", "preheat", "manual")
 FORECAST_EVERY = timedelta(minutes=10)
 SCENARIOS_EVERY = timedelta(minutes=60)
 FORECAST_HOURS = 72
@@ -108,6 +112,10 @@ class HybridHeatingController:
         self._forecast_busy = False
         self.forecast_hypothetical = False
         self.scenarios: dict = {"base": None, "scenarios": []}
+        # self-testing ("explore")
+        self.explore: dict | None = None        # running test session
+        self.explore_log: list = []
+        self.explore_spent: dict = {}           # iso week -> EUR
 
     # ---- lifecycle ----------------------------------------------------
     async def async_setup(self) -> None:
@@ -133,6 +141,8 @@ class HybridHeatingController:
         self.events.update(data.get("events", {}))
         self.suggestions = data.get("suggestions", [])
         self.weather_bias = data.get("weather_bias", 0.0)
+        self.explore_log = data.get("explore_log", [])
+        self.explore_spent = data.get("explore_spent", {})
         for key in (CONF_PRICE_KWH, CONF_PRICE_GAS):
             self.settings.setdefault(key, float(self.conf[key]))
 
@@ -154,6 +164,7 @@ class HybridHeatingController:
             "schedule": self.schedule, "thermal": self.model.to_dict(), "costs": self.costs,
             "day_start": self.day_start, "comfort": self.comfort, "events": self.events,
             "suggestions": self.suggestions, "weather_bias": self.weather_bias,
+            "explore_log": self.explore_log, "explore_spent": self.explore_spent,
         }
 
     def _save(self) -> None:
@@ -227,6 +238,8 @@ class HybridHeatingController:
             return False
         if feature == "fan":
             return len(self.fan_modes()) >= 2
+        if feature == "explore":
+            return len(self._strategies(self.t_out)) >= 2
         need = {"windows": CONF_WINDOWS, "presence": CONF_PRESENCE, "forecast": CONF_WEATHER,
                 "buffer": CONF_WEATHER, "solar": CONF_SOLAR}.get(feature)
         return not need or bool(_as_list(self.conf.get(need)))
@@ -439,6 +452,9 @@ class HybridHeatingController:
             presence=self.presence, away_temp=float(s["away_temp"]),
             vacation_temp=float(s["vacation_temp"]), window_open=self.window_open,
             fan_control=self.feature_active("fan"),
+            night=(parse_hhmm(s["night_start"]), parse_hhmm(s["night_end"]))
+            if self.features.get("night") else None,
+            night_min=float(s["night_min"]),
             buffer_deg=float(c[CONF_BUFFER_DEG]) if self.feature_active("buffer") and self._forecast else 0.0,
             buffer_threshold=float(c[CONF_BUFFER_THRESHOLD]) / 100,
             hysteresis=float(c[CONF_HYSTERESIS]),
@@ -463,8 +479,9 @@ class HybridHeatingController:
 
         controlling = s["mode"] != MODE_OFF and self.override_until is None
         if controlling:
-            self.decision = self.planner.decide(inputs, self.model)
+            self.decision = self._decide_with_explore(inputs, now)
         else:
+            self._end_explore(now, "stopped")
             self.planner.reset()
             self._expected.clear()
             reason = "learn_only" if s["mode"] == MODE_OFF else "manual_override"
@@ -505,8 +522,8 @@ class HybridHeatingController:
         self._track_diag(kwh, m3)
         self._track_comfort(now)
 
-        if controlling and d.phase == "paused":
-            await self._apply_all_off()
+        if controlling and (d.phase == "paused" or (d.reason == "night_off" and d.strategy == STRAT_OFF)):
+            await self._apply_all_off(float(s["night_min"]) if d.reason == "night_off" else None)
         elif controlling and d.strategy != STRAT_OFF:
             await self._apply(d)
 
@@ -514,10 +531,100 @@ class HybridHeatingController:
         await self._check_health(now)
         self._notify()
 
+    # ---- self-testing ---------------------------------------------------
+    def _week_key(self, now: datetime) -> str:
+        y, w, _ = now.isocalendar()
+        return f"{y}-W{w:02d}"
+
+    def explore_budget_left(self, now: datetime | None = None) -> float:
+        now = now or dt_util.now()
+        spent = self.explore_spent.get(self._week_key(now), 0.0)
+        return max(float(self.settings["explore_budget"]) - spent, 0.0)
+
+    def explore_needs(self, now: datetime) -> list[dict]:
+        """Which sources need data, most urgent first."""
+        conf = self.model.confidence()
+        days = float(self.settings["explore_days"])
+        out = []
+        for src, param in (("airco", "ga0"), ("cv", "gc")):
+            seen = self.model.last_seen.get(src)
+            age = (now.timestamp() - seen) / 86400 if seen else None
+            level = conf[param]
+            urgency = 3 if level == "none" else 2 if level == "low" else 1 if (age is None or age >= days) else 0
+            out.append({"source": src, "confidence": level, "days_ago": round(age, 1) if age is not None else None,
+                        "urgency": urgency})
+        return sorted(out, key=lambda x: (-x["urgency"], -(x["days_ago"] or 999)))
+
+    def _decide_with_explore(self, inputs: Inputs, now: datetime) -> Decision:
+        ex = self.explore
+        if ex:  # running test: keep using the test source while comfort allows
+            inputs.explore_source = ex["source"]
+            d = self.planner.decide(inputs, self.model)
+            gained = self.model.counts.get(ex["source"], 0.0) - ex["count0"]
+            if not d.exploring:
+                ex["misses"] = ex.get("misses", 0) + 1
+            if (gained >= EXPLORE_SAMPLES or now - ex["since"] >= EXPLORE_MAX
+                    or d.reason not in EXPLORE_REASONS or ex.get("misses", 0) >= 3):
+                self._end_explore(now, "done" if gained >= EXPLORE_SAMPLES else "stopped")
+            return d
+        d = self.planner.decide(inputs, self.model)
+        if not self.feature_active("explore") or d.reason not in EXPLORE_REASONS:
+            return d
+        if d.strategy in (STRAT_BOTH, STRAT_OFF):
+            return d
+        need = next((n for n in self.explore_needs(now) if n["urgency"]
+                     and n["source"] in inputs.strategies and n["source"] != d.strategy), None)
+        if not need:
+            return d
+        src = need["source"]
+        if d.phase == PHASE_HEAT:
+            alt = next((o for o in d.heat_options if o.strategy == src), None)
+            cur = next((o for o in d.heat_options if o.strategy == d.strategy), None)
+            if not alt or not cur or alt.cost == float("inf"):
+                return d
+            premium = max(alt.cost - cur.cost, 0.0)
+        else:
+            alt_c, cur_c = d.maintain_costs.get(src), d.maintain_costs.get(d.strategy)
+            if alt_c is None or cur_c is None or alt_c == float("inf"):
+                return d
+            premium = max(alt_c - cur_c, 0.0) * 1.5
+        if premium > self.explore_budget_left(now):
+            return d
+        test = copy.copy(inputs)
+        test.explore_source = src
+        d2 = self.planner.decide(test, self.model)
+        if not d2.exploring:
+            return d
+        wk = self._week_key(now)
+        self.explore_spent[wk] = round(self.explore_spent.get(wk, 0.0) + premium, 3)
+        self.explore_spent = dict(sorted(self.explore_spent.items())[-8:])
+        self.explore = {"source": src, "since": now, "premium": round(premium, 3),
+                        "count0": self.model.counts.get(src, 0.0), "phase": d2.phase,
+                        "instead_of": d.strategy}
+        _LOGGER.info("Self-test: using %s instead of %s to learn (≈ € %.2f extra)",
+                     src, d.strategy, premium)
+        self._save()
+        return d2
+
+    def _end_explore(self, now: datetime, result: str) -> None:
+        ex = self.explore
+        if not ex:
+            return
+        self.explore = None
+        self.explore_log.append({
+            "start": ex["since"].isoformat(), "end": now.isoformat(), "source": ex["source"],
+            "instead_of": ex["instead_of"], "phase": ex["phase"], "premium": ex["premium"],
+            "samples": round(self.model.counts.get(ex["source"], 0.0) - ex["count0"], 1),
+            "result": result,
+        })
+        self.explore_log = self.explore_log[-20:]
+        self._save()
+
     async def _async_forecast(self, inputs: Inputs, controlling: bool, now: datetime) -> None:
         self._forecast_busy = True
         try:
             base = copy.copy(inputs)
+            base.explore_source = None   # the forecast shows normal operation
             planner = copy.deepcopy(self.planner)
             hypothetical = not controlling
             if hypothetical:  # learn only / paused: show what the schedule would do
@@ -819,6 +926,15 @@ class HybridHeatingController:
             "forecast": self.forecast_result,
             "forecast_hypothetical": self.forecast_hypothetical,
             "scenarios": self.scenarios,
+            "explore": {
+                "active": self.feature_active("explore"),
+                "session": ({**self.explore, "since": self.explore["since"].isoformat()}
+                            if self.explore else None),
+                "needs": self.explore_needs(dt_util.now()),
+                "budget": float(self.settings["explore_budget"]),
+                "left": round(self.explore_budget_left(), 2),
+                "log": self.explore_log[-10:],
+            },
             "fan": {"modes": self.fan_modes(), "boost": self.fan_mode_for("boost"),
                     "comfort": self.fan_mode_for("comfort"), "active": self.feature_active("fan"),
                     "boosting": self._airco_boosting()},
@@ -891,10 +1007,10 @@ class HybridHeatingController:
         phase = PHASE_HEAT if target - self.t_in > hysteresis else PHASE_MAINTAIN
         return Decision(strategy, phase, target, reason)
 
-    async def _apply_all_off(self) -> None:
+    async def _apply_all_off(self, cv_temp: float | None = None) -> None:
         c = self.conf
         await self._set_climate(c[CONF_AIRCO], "off", None)
-        await self._set_climate(c[CONF_CV], "heat", c[CONF_CV_SETBACK])
+        await self._set_climate(c[CONF_CV], "heat", cv_temp if cv_temp is not None else c[CONF_CV_SETBACK])
 
     async def _apply(self, d: Decision) -> None:
         c = self.conf

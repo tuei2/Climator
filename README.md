@@ -48,6 +48,10 @@ and while the heating is off** (cooling down teaches it the heat loss). Older da
 fades out (half-life about a week). Until there is enough data, sensible defaults are used.
 Samples are skipped when hot water is running, a window is open, a meter jumps or data is missing.
 
+Each kind of sample (air conditioner, boiler, both, nothing) only ages when new samples of
+the same kind arrive. A source that is not used for weeks therefore **keeps what was learned
+about it** instead of drifting back to the defaults.
+
 With the model Climator can:
 - calculate how long each source needs to heat up and what it costs;
 - calculate the cost per hour to keep the room warm with each source;
@@ -65,6 +69,26 @@ The **Model** tab of the panel shows:
 - **checks**: sensors available, meters counting while heating, model values plausible,
   enough usable data, forecast received;
 - skipped samples per reason, suggestions, and reset buttons per part.
+
+## Self-testing
+If Climator always picks the air conditioner, it would never learn how the boiler really
+performs. With **self-testing** (on by default, switch off in the panel) Climator deliberately
+uses a source when it knows too little about it (confidence *none* or *low*) or when the source
+gave no data for a number of days (default 5):
+- only during normal heating moments (comfort, eco, preheat, fixed temperature), never at night,
+  when away, on vacation or with a window open;
+- only if the room is still warm in time (preheat deadlines are respected);
+- only within a **weekly budget** for the extra cost (default € 1);
+- a test stops after about an hour of useful data, after 2 hours, or when comfort would suffer.
+
+The panel shows a banner while testing, and the **Model** tab lists per source how recent the
+data is and the last tests with their cost. *Learn only* mode never tests (it controls nothing).
+
+## Off at night
+Optional (**Settings → Off at night**): during a time window (default 23:00–06:00) the air
+conditioner is switched **off** and the boiler goes to a low temperature (default 12 °C), which
+also acts as frost guard. Preheating for the next comfort block still starts in time — also
+during the window. In *Fixed temperature* mode the room is preheated for the end of the window.
 
 ## Air conditioner fan
 Climator lets the fan **blow hard while heating up** (fastest, used for preheating) and
@@ -89,6 +113,8 @@ In *Learn only* mode the forecast shows what the schedule *would* do.
 ## Functions — each can be switched off
 | Function | What it does | Needs |
 |---|---|---|
+| Off at night | Airco off and boiler low in a time window (off by default) | — |
+| Self-testing | Use a less known source now and then to keep learning, within a budget | airco + boiler |
 | Fan speeds | Hard fan while heating up, soft fan while keeping warm | airco with fan modes |
 | Window detection | Pauses heating while a window/door is open (after a delay) | window sensors |
 | Presence | Away temperature when nobody is home (after a delay); *Guests* switch ignores it | presence entities |

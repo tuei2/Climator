@@ -20,7 +20,7 @@ const COLORS = {
 };
 const STRATS = ["airco", "cv", "both"];
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const FEATURES = ["fan", "windows", "presence", "forecast", "buffer", "solar", "notifications", "suggestions"];
+const FEATURES = ["night", "explore", "fan", "windows", "presence", "forecast", "buffer", "solar", "notifications", "suggestions"];
 
 const I18N = {
   en: {
@@ -32,7 +32,7 @@ const I18N = {
       off: "Off", sensor_unavailable: "Sensor unavailable", no_source: "No heat source available",
       comfort: "Comfort period", eco: "Eco period", preheat: "Preheating", manual: "Fixed temperature",
       learn_only: "Learn only", manual_override: "Paused after manual change", window_open: "Window open",
-      away: "Away", vacation: "Vacation", buffer: "Buffering heat",
+      away: "Away", vacation: "Vacation", buffer: "Buffering heat", night_off: "Night: off",
     },
     presence: { home: "Home", away: "Away", vacation: "Vacation" },
     banner: {
@@ -153,8 +153,26 @@ const I18N = {
     fanNone: "The air conditioner reports no fan modes.",
     fanCard: "Fan", fanGain: (p) => `Blowing hard gives ${p} heat per kWh than softly.`,
     fanRates: (b, c, u) => `Max heat-up: hard ${b} °C/${u} · soft ${c} °C/${u}`,
+    night: {
+      title: "Off at night", text: "During this window the air conditioner is switched off and the boiler goes to a low temperature. Preheating still starts in time.",
+      from: "From", until: "Until", min: "Boiler at night (frost guard)",
+      banner: (u, t) => `Night: air conditioner off, boiler at ${t} °C until ${u}.`, preheat: (p) => ` Preheating starts at ${p}.`,
+    },
+    ex: {
+      title: "Self-testing", text: "When Climator knows too little about a source, or it has not been used for a while, it deliberately uses it during a normal heating moment — only if the room is still warm in time, and within a weekly budget.",
+      budget: "Budget per week", days: "Test a source again after", daysUnit: "days without data",
+      left: (l, b) => `Left this week: ${l} of ${b}`,
+      banner: (s, i, c) => `Self-test: using the ${s} instead of the ${i} to learn (≈ ${c} extra, max 2 h).`,
+      need: { 0: "up to date", 1: "data is old", 2: "uncertain", 3: "no data yet" },
+      lastData: (d) => d == null ? "never" : d < 1 ? "today" : `${d} days ago`,
+      logTitle: "Recent tests", noLog: "No tests yet.", instead: "instead of",
+      result: { done: "enough data", stopped: "stopped" },
+      perSource: "Data per source",
+    },
     mode: "Mode", functions: "Functions", functionsText: "Optional functions. Switch off what you don't want; Climator then simply ignores it.",
     feat: {
+      night: ["Off at night", "Air conditioner off and boiler low during the night window."],
+      explore: ["Self-testing", "Occasionally use the less known source to keep learning (within a budget)."],
       fan: ["Fan speeds", "Blow hard while heating up, softly while keeping warm."],
       windows: ["Window detection", "Pause heating while a window or door is open."],
       presence: ["Presence", "Use the away temperature when nobody is home."],
@@ -183,7 +201,7 @@ const I18N = {
       off: "Uit", sensor_unavailable: "Sensor onbeschikbaar", no_source: "Geen warmtebron beschikbaar",
       comfort: "Comfortperiode", eco: "Ecoperiode", preheat: "Voorverwarmen", manual: "Vaste temperatuur",
       learn_only: "Alleen leren", manual_override: "Gepauzeerd na handmatige bediening", window_open: "Raam open",
-      away: "Afwezig", vacation: "Vakantie", buffer: "Warmte bufferen",
+      away: "Afwezig", vacation: "Vakantie", buffer: "Warmte bufferen", night_off: "Nacht: uit",
     },
     presence: { home: "Thuis", away: "Afwezig", vacation: "Vakantie" },
     banner: {
@@ -304,8 +322,26 @@ const I18N = {
     fanNone: "De airco meldt geen ventilatorstanden.",
     fanCard: "Ventilator", fanGain: (p) => `Hard blazen geeft ${p} warmte per kWh dan zacht.`,
     fanRates: (b, c, u) => `Max opwarmen: hard ${b} °C/${u} · zacht ${c} °C/${u}`,
+    night: {
+      title: "'s Nachts uit", text: "In dit tijdvenster gaat de airco uit en de CV naar een lage temperatuur. Voorverwarmen start gewoon op tijd.",
+      from: "Van", until: "Tot", min: "CV 's nachts (vorstbeveiliging)",
+      banner: (u, t) => `Nacht: airco uit, CV op ${t} °C tot ${u}.`, preheat: (p) => ` Voorverwarmen start om ${p}.`,
+    },
+    ex: {
+      title: "Zelf testen", text: "Weet Climator te weinig van een bron, of is die al een tijd niet gebruikt, dan zet hij die bewust in bij een normaal stookmoment — alleen als de kamer nog steeds op tijd warm is, en binnen een weekbudget.",
+      budget: "Budget per week", days: "Bron opnieuw testen na", daysUnit: "dagen zonder data",
+      left: (l, b) => `Over deze week: ${l} van ${b}`,
+      banner: (s, i, c) => `Zelf testen: de ${s} wordt gebruikt in plaats van de ${i} om te leren (≈ ${c} extra, max 2 uur).`,
+      need: { 0: "actueel", 1: "data is oud", 2: "onzeker", 3: "nog geen data" },
+      lastData: (d) => d == null ? "nooit" : d < 1 ? "vandaag" : `${d} dagen geleden`,
+      logTitle: "Recente tests", noLog: "Nog geen tests.", instead: "in plaats van",
+      result: { done: "genoeg data", stopped: "gestopt" },
+      perSource: "Data per bron",
+    },
     mode: "Modus", functions: "Functies", functionsText: "Optionele functies. Zet uit wat je niet wilt; Climator negeert het dan gewoon.",
     feat: {
+      night: ["'s Nachts uit", "Airco uit en CV laag tijdens het nachtvenster."],
+      explore: ["Zelf testen", "Af en toe de minst bekende bron inzetten om te blijven leren (binnen een budget)."],
       fan: ["Ventilatorstanden", "Hard blazen bij opwarmen, zacht blazen bij warm houden."],
       windows: ["Raamdetectie", "Verwarming pauzeren als een raam of deur open staat."],
       presence: ["Aanwezigheid", "Afwezig-temperatuur gebruiken als niemand thuis is."],
@@ -529,6 +565,16 @@ class ClimatorPanel extends HTMLElement {
       const until = a.override_until ? this._time(new Date(a.override_until)) : "?";
       const ent = this._st(a.override_entity)?.attributes?.friendly_name || a.override_entity || "?";
       out.push(`<div class="banner warn"><div>${esc(t.banner.paused(until, ent))}</div><button class="btn" data-action="mode" data-value="${esc(mode)}">${t.banner.resume}</button></div>`);
+    }
+    const ex = info.explore?.session;
+    if (ex) {
+      out.push(`<div class="banner info"><div>🧪 ${esc(t.ex.banner(t.strategy[ex.source], t.strategy[ex.instead_of], this._eur(ex.premium)))}</div></div>`);
+    }
+    if (reason === "night_off") {
+      const st = info.settings || {};
+      const pre = this._st(E.preheat)?.state;
+      const preTxt = pre && !["unknown", "unavailable"].includes(pre) ? t.night.preheat(this._when(new Date(pre))) : "";
+      out.push(`<div class="banner"><div>🌙 ${esc(t.night.banner(st.night_end || "?", this._fmt(st.night_min, 0)) + preTxt)}</div></div>`);
     }
     if (info.window_open || reason === "window_open") {
       const names = (info.open_windows || []).map((e) => this._st(e)?.attributes?.friendly_name || e).join(", ");
@@ -1094,6 +1140,7 @@ class ClimatorPanel extends HTMLElement {
         <div class="sub">${beText} (${t.strategy.airco} ${this._eur(caNow, 3)}/°C · ${t.strategy.cv} ${this._eur(ccNow, 3)}/°C ${t.nowWord})</div>
         <div class="legend"><span class="band-key"><i class="line" style="--c:${COLORS.airco}"></i>${t.strategy.airco}</span><span class="band-key"><i class="line" style="--c:${COLORS.cv}"></i>${t.strategy.cv}</span></div>
         <div class="chart" data-chart="breakeven"></div></div>
+      ${this._exploreCard()}
       <div class="two">
         <div class="card"><h2>${t.diagTitle}</h2>${diag}</div>
         <div class="card"><h2>${t.suggTitle}</h2>${sugg || `<div class="muted">${t.noSugg}</div>`}
@@ -1105,6 +1152,19 @@ class ClimatorPanel extends HTMLElement {
           <div class="resets">${Object.entries(t.scopes).map(([k, v]) => `<button class="btn ${k === "all" ? "danger" : ""}" data-action="reset" data-value="${k}">${v}</button>`).join("")}</div>
         </div>
       </div>`;
+  }
+
+  _exploreCard() {
+    const t = this.t, ex = this._info?.explore;
+    if (!ex) return "";
+    const needs = (ex.needs || []).map((n) => `<div class="kv"><span>${this._chip(n.source)} ${t.ex.lastData(n.days_ago)}</span>
+      <b class="${n.urgency >= 2 ? "more" : n.urgency === 1 ? "warnc" : "save"}">${t.ex.need[n.urgency]}</b></div>`).join("");
+    const log = (ex.log || []).slice().reverse().map((l) => `<div class="kv"><span>${this._when(new Date(l.start))} · ${this._chip(l.source)} ${t.ex.instead} ${esc(t.strategy[l.instead_of] || l.instead_of)}</span>
+      <b>${this._eur(l.premium)} · ${esc(t.ex.result[l.result] || l.result)}</b></div>`).join("");
+    return `<div class="card"><h2>🧪 ${t.ex.title} <span class="fstate ${ex.active ? "on" : "off"}">${ex.active ? t.active : t.off}</span></h2>
+      <div class="two inner"><div><h3>${t.ex.perSource}</h3>${needs}
+        <div class="muted" style="margin-top:8px">${t.ex.left(this._eur(ex.left), this._eur(ex.budget))}</div></div>
+        <div><h3>${t.ex.logTitle}</h3>${log || `<div class="muted">${t.ex.noLog}</div>`}</div></div></div>`;
   }
 
   _drawModelCharts() {
@@ -1187,6 +1247,20 @@ class ClimatorPanel extends HTMLElement {
         <div class="profiles">${profile("workday")}${d.weekend_enabled ? profile("weekend") : ""}</div>
         <div class="form"><div>${t.ecoTemp}</div>${num("eco_temp", s.eco_temp, 0.5, "°C")}</div>
         <div class="actions"><span class="muted">${dirty ? t.unsaved : ""}</span><button class="btn primary" data-action="save-schedule" ${dirty ? "" : "disabled"}>${t.save}</button></div></div>
+      <div class="card"><h2>🌙 ${t.night.title}</h2><div class="muted">${t.night.text}</div>
+        <div class="form">
+          <div>${t.feat.night[0]}</div><label class="switch"><input type="checkbox" data-feature="night" ${info.features.night ? "checked" : ""}><span></span></label>
+          <div>${t.night.from}</div><label class="field"><input type="time" value="${esc(s.night_start)}" data-setting-str="night_start"></label>
+          <div>${t.night.until}</div><label class="field"><input type="time" value="${esc(s.night_end)}" data-setting-str="night_end"></label>
+          <div>${t.night.min}</div>${num("night_min", s.night_min, 0.5, "°C", 5, 18)}
+        </div></div>
+      <div class="card"><h2>🧪 ${t.ex.title}</h2><div class="muted">${t.ex.text}</div>
+        <div class="form">
+          <div>${t.feat.explore[0]}</div><label class="switch"><input type="checkbox" data-feature="explore" ${info.features.explore ? "checked" : ""}><span></span></label>
+          <div>${t.ex.budget}</div>${num("explore_budget", s.explore_budget, 0.25, "€", 0, 20)}
+          <div>${t.ex.days}</div>${num("explore_days", s.explore_days, 1, t.ex.daysUnit, 1, 60)}
+        </div>
+        <div class="muted" style="margin-top:8px">${t.ex.left(this._eur(info.explore?.left), this._eur(info.explore?.budget))}</div></div>
       <div class="card"><h2>${t.fanTitle}</h2><div class="muted">${t.fanText}</div>
         ${(info.fan?.modes || []).length ? `<div class="form">
           <div>${t.fanBoost}</div><select data-setting-str="fan_boost_mode">${this._fanOptions(s.fan_boost_mode, info.fan.boost)}</select>
@@ -1417,7 +1491,10 @@ select { padding:7px 10px; border-radius:8px; border:1px solid var(--divider-col
 .tbl tr:last-child td { border-bottom:0; }
 .tbl.scen td { vertical-align:top; }
 .tbl.scen td.num { text-align:right; white-space:nowrap; font-weight:600; }
-.save { color:#66bb6a; } .more { color:#ef5350; }
+.save { color:#66bb6a; } .more { color:#ef5350; } .warnc { color:#ffa726; }
+.banner.info { border-color:#42a5f5; background:rgba(66,165,245,.12); }
+.two.inner { gap:24px; }
+.kv .chip { font-size:12px; margin-right:6px; }
 @media (max-width: 700px) {
   .toolbar { flex-wrap:wrap; height:auto; padding:8px; gap:8px; }
   .status { display:none; }
