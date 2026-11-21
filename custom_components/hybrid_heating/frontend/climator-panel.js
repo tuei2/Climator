@@ -20,7 +20,7 @@ const COLORS = {
 };
 const STRATS = ["airco", "cv", "both"];
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const FEATURES = ["night", "explore", "fan", "windows", "presence", "forecast", "buffer", "solar", "notifications", "suggestions"];
+const FEATURES = ["smart_setback", "night", "explore", "fan", "windows", "presence", "forecast", "buffer", "solar", "notifications", "suggestions"];
 
 const I18N = {
   en: {
@@ -169,8 +169,21 @@ const I18N = {
       result: { done: "enough data", stopped: "stopped" },
       perSource: "Data per source",
     },
+    sb: {
+      title: "Smart night temperature",
+      text: "For the coming night Climator simulates every level between your eco temperature and the maximum, including heating up again in the morning, and picks the cheapest one that is just as comfortable.",
+      chosen: (l, a, b) => `Coming setback (${a} – ${b}): ${l}.`,
+      off: "off at night", level: (v) => `${v} °C`,
+      saving: (v, base) => `Saves about ${v} compared with your own setting (${base}).`,
+      same: "Your own setting is already the cheapest.",
+      why: (t) => `Coldest expected outside: ${t} °C.`,
+      chartTitle: "Expected cost per night level (until the next comfort block)",
+      max: "Highest night temperature", hint: "The lowest level is your eco temperature (schedule).",
+      yours: "your setting", best: "chosen",
+    },
     mode: "Mode", functions: "Functions", functionsText: "Optional functions. Switch off what you don't want; Climator then simply ignores it.",
     feat: {
+      smart_setback: ["Smart night temperature", "Pick the cheapest night temperature from the model and the weather forecast."],
       night: ["Off at night", "Air conditioner off and boiler low during the night window."],
       explore: ["Self-testing", "Occasionally use the less known source to keep learning (within a budget)."],
       fan: ["Fan speeds", "Blow hard while heating up, softly while keeping warm."],
@@ -338,8 +351,21 @@ const I18N = {
       result: { done: "genoeg data", stopped: "gestopt" },
       perSource: "Data per bron",
     },
+    sb: {
+      title: "Slimme nachttemperatuur",
+      text: "Voor de komende nacht rekent Climator elk niveau tussen je eco-temperatuur en het maximum door, inclusief het opwarmen 's ochtends, en kiest het goedkoopste dat net zo comfortabel is.",
+      chosen: (l, a, b) => `Komende nacht (${a} – ${b}): ${l}.`,
+      off: "'s nachts uit", level: (v) => `${v} °C`,
+      saving: (v, base) => `Scheelt ongeveer ${v} ten opzichte van je eigen instelling (${base}).`,
+      same: "Je eigen instelling is al het goedkoopst.",
+      why: (t) => `Koudste verwachting buiten: ${t} °C.`,
+      chartTitle: "Verwachte kosten per nachtniveau (tot het volgende comfortblok)",
+      max: "Hoogste nachttemperatuur", hint: "Het laagste niveau is je eco-temperatuur (schema).",
+      yours: "jouw instelling", best: "gekozen",
+    },
     mode: "Modus", functions: "Functies", functionsText: "Optionele functies. Zet uit wat je niet wilt; Climator negeert het dan gewoon.",
     feat: {
+      smart_setback: ["Slimme nachttemperatuur", "De goedkoopste nachttemperatuur kiezen met het model en de weersverwachting."],
       night: ["'s Nachts uit", "Airco uit en CV laag tijdens het nachtvenster."],
       explore: ["Zelf testen", "Af en toe de minst bekende bron inzetten om te blijven leren (binnen een budget)."],
       fan: ["Ventilatorstanden", "Hard blazen bij opwarmen, zacht blazen bij warm houden."],
@@ -945,9 +971,28 @@ class ClimatorPanel extends HTMLElement {
           </div>
         </div>
       </div>
+      ${this._setbackCard()}
       <div class="card"><h2>${F.savingsTitle}</h2>
         <div class="muted">${sc.base ? F.savingsText(this._eur(sc.base.week)) : ""}</div>
         <table class="tbl scen"><tbody>${scen}</tbody></table></div>`;
+  }
+
+  _setbackCard() {
+    const t = this.t, S = t.sb, sb = this._info?.setback;
+    if (!sb) return "";
+    const name = (l) => (l === null || l === undefined ? S.off : S.level(this._fmt(l, 1)));
+    const max = Math.max(...sb.options.map((o) => o.cost), 0.01);
+    const rows = sb.options.map((o) => {
+      const chosen = o.level === sb.level, base = o.level === sb.baseline_level;
+      return `<div class="sbrow ${chosen ? "chosen" : ""}"><span class="sblbl">${esc(name(o.level))}</span>
+        <div class="sbbar"><div style="width:${(100 * o.cost / max).toFixed(1)}%"></div></div>
+        <span class="sbval">${this._eur(o.cost)}</span>
+        <span class="sbtag">${chosen ? S.best : ""}${chosen && base ? " · " : ""}${base ? S.yours : ""}</span></div>`;
+    }).join("");
+    return `<div class="card"><h2>🌙 ${S.title}</h2><div class="muted">${S.text}</div>
+      <div class="sbsum"><b>${esc(S.chosen(name(sb.level), this._when(new Date(sb.from)), this._when(new Date(sb.until))))}</b>
+        ${sb.saving > 0.005 ? esc(S.saving(this._eur(sb.saving), name(sb.baseline_level))) : esc(S.same)} ${esc(S.why(this._fmt(sb.t_out_min, 1)))}</div>
+      <h3 class="mt2">${S.chartTitle}</h3><div class="sbchart">${rows}</div></div>`;
   }
 
   _splitBar(parts) {
@@ -1247,6 +1292,11 @@ class ClimatorPanel extends HTMLElement {
         <div class="profiles">${profile("workday")}${d.weekend_enabled ? profile("weekend") : ""}</div>
         <div class="form"><div>${t.ecoTemp}</div>${num("eco_temp", s.eco_temp, 0.5, "°C")}</div>
         <div class="actions"><span class="muted">${dirty ? t.unsaved : ""}</span><button class="btn primary" data-action="save-schedule" ${dirty ? "" : "disabled"}>${t.save}</button></div></div>
+      <div class="card"><h2>${t.sb.title}</h2><div class="muted">${t.sb.text}</div>
+        <div class="form">
+          <div>${t.feat.smart_setback[0]}</div><label class="switch"><input type="checkbox" data-feature="smart_setback" ${info.features.smart_setback ? "checked" : ""}><span></span></label>
+          <div>${t.sb.max}</div>${num("setback_max", s.setback_max, 0.5, "°C", 10, 22)}
+        </div><div class="muted" style="margin-top:8px">${t.sb.hint}</div></div>
       <div class="card"><h2>🌙 ${t.night.title}</h2><div class="muted">${t.night.text}</div>
         <div class="form">
           <div>${t.feat.night[0]}</div><label class="switch"><input type="checkbox" data-feature="night" ${info.features.night ? "checked" : ""}><span></span></label>
@@ -1492,6 +1542,13 @@ select { padding:7px 10px; border-radius:8px; border:1px solid var(--divider-col
 .tbl.scen td { vertical-align:top; }
 .tbl.scen td.num { text-align:right; white-space:nowrap; font-weight:600; }
 .save { color:#66bb6a; } .more { color:#ef5350; } .warnc { color:#ffa726; }
+.sbsum { margin:12px 0 4px; line-height:1.5; font-size:14px; }
+.sbchart { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+.sbrow { display:grid; grid-template-columns:110px 1fr 70px 140px; gap:10px; align-items:center; font-size:13px; }
+.sbbar { height:12px; background:rgba(127,127,127,.15); border-radius:6px; overflow:hidden; }
+.sbbar div { height:100%; background:#78909c; border-radius:6px; }
+.sbrow.chosen .sbbar div { background:#66bb6a; } .sbrow.chosen { font-weight:600; }
+.sbval { text-align:right; } .sbtag { color:var(--secondary-text-color); font-size:12px; }
 .banner.info { border-color:#42a5f5; background:rgba(66,165,245,.12); }
 .two.inner { gap:24px; }
 .kv .chip { font-size:12px; margin-right:6px; }

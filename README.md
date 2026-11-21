@@ -84,6 +84,17 @@ gave no data for a number of days (default 5):
 The panel shows a banner while testing, and the **Model** tab lists per source how recent the
 data is and the last tests with their cost. *Learn only* mode never tests (it controls nothing).
 
+## Smart night temperature
+Letting the room cool down is not always cheaper: after a deep cool-down the morning heat-up may
+need the boiler or both sources at the coldest moment of the day, while keeping the room a bit
+warmer could be done by the air conditioner on a soft fan. With **smart night temperature**
+(on by default) Climator simulates every level from your eco temperature up to a maximum
+(default 19 °C) — and "off at night" when that is enabled — for the coming setback period,
+including heating up again, using the model and the weather forecast. It picks the cheapest
+level that is just as comfortable, and only deviates from your own setting when that saves at
+least € 0.03 (or 2 %). Re-evaluated every 30 minutes. The **Forecast** tab shows the chosen
+level, the saving and the expected cost of every level.
+
 ## Off at night
 Optional (**Settings → Off at night**): during a time window (default 23:00–06:00) the air
 conditioner is switched **off** and the boiler goes to a low temperature (default 12 °C), which
@@ -113,6 +124,7 @@ In *Learn only* mode the forecast shows what the schedule *would* do.
 ## Functions — each can be switched off
 | Function | What it does | Needs |
 |---|---|---|
+| Smart night temperature | Cheapest night/eco level between eco and a maximum, from model + forecast | — |
 | Off at night | Airco off and boiler low in a time window (off by default) | — |
 | Self-testing | Use a less known source now and then to keep learning, within a budget | airco + boiler |
 | Fan speeds | Hard fan while heating up, soft fan while keeping warm | airco with fan modes |

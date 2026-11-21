@@ -115,6 +115,7 @@ views:
       - type: entities
         title: Functions
         entities:
+          - switch.climator_feature_smart_setback
           - switch.climator_feature_night
           - switch.climator_feature_explore
           - switch.climator_feature_fan

@@ -92,13 +92,14 @@ DEFAULT_SETTINGS = {
     "night_start": "23:00",     # night: airco off, boiler at night_min (feature "night")
     "night_end": "06:00",
     "night_min": 12.0,
+    "setback_max": 19.0,        # smart setback: highest level considered (lowest = eco_temp)
 }
 
 # Optional functions; each can be switched off (switch entity + panel).
-FEATURES = ["night", "explore", "fan", "windows", "presence", "forecast", "buffer", "solar", "notifications",
+FEATURES = ["smart_setback", "night", "explore", "fan", "windows", "presence", "forecast", "buffer", "solar", "notifications",
             "suggestions"]
 DEFAULT_FEATURES = {f: f not in ("buffer", "night") for f in FEATURES}
 
 UPDATE_INTERVAL_SECONDS = 60
 STORAGE_VERSION = 1
-VERSION = "0.7.0"
+VERSION = "0.8.0"

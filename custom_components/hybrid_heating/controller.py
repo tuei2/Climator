@@ -28,7 +28,7 @@ from .const import (
 from .model import SampleCollector, ThermalModel
 from .planner import (
     PHASE_HEAT, PHASE_MAINTAIN, PHASE_OFF, STRAT_AIRCO, STRAT_BOTH, STRAT_CV, STRAT_OFF,
-    Decision, Inputs, Planner, Prices, forecast, what_if,
+    Decision, Inputs, Planner, Prices, choose_setback, forecast, what_if,
 )
 from .schedule import _t as parse_hhmm
 from .schedule import DEFAULT_SCHEDULE, comfort_at, validate
@@ -43,6 +43,7 @@ HOME_STATES = ("home", "on", "true")
 WINDOW_LEARN_BLOCK = timedelta(minutes=15)
 FORECAST_REFRESH = timedelta(minutes=30)
 NOTIFY_ID = "climator_{}"
+SETBACK_EVERY = timedelta(minutes=30)
 EXPLORE_MAX = timedelta(minutes=120)
 EXPLORE_SAMPLES = 4             # ~1 hour of useful data ends a test
 EXPLORE_REASONS = ("comfort", "eco", "preheat", "manual")
@@ -112,6 +113,9 @@ class HybridHeatingController:
         self._forecast_busy = False
         self.forecast_hypothetical = False
         self.scenarios: dict = {"base": None, "scenarios": []}
+        # smart setback: chosen night/eco level for the current setback period
+        self.setback: dict | None = None
+        self._last_setback: datetime | None = None
         # self-testing ("explore")
         self.explore: dict | None = None        # running test session
         self.explore_log: list = []
@@ -192,6 +196,7 @@ class HybridHeatingController:
         self.settings[key] = value
         self._clear_override()
         self._last_forecast_calc = None
+        self._last_setback = None
         self._save()
         await self._async_tick()
 
@@ -202,6 +207,7 @@ class HybridHeatingController:
     async def async_set_feature(self, feature: str, on: bool) -> None:
         self.features[feature] = bool(on)
         self._last_scenarios = None
+        self._last_setback = None
         if feature == "notifications" and not on:
             for nid in list(self._notified):
                 self._dismiss(nid)
@@ -212,6 +218,7 @@ class HybridHeatingController:
     async def async_set_schedule(self, schedule: dict) -> None:
         self.schedule = validate(schedule)
         self.planner.reset()
+        self._last_setback = None
         self._last_forecast_calc = None
         self._save()
         await self._async_tick()
@@ -464,6 +471,8 @@ class HybridHeatingController:
             min_switch=timedelta(minutes=float(c[CONF_MIN_SWITCH])),
         )
         prev = self.decision
+        raw_inputs = copy.copy(inputs)
+        self._apply_setback(inputs, now)
 
         if s["mode"] != MODE_OFF and self.override_until is None:
             if entity := self._detect_override():
@@ -494,7 +503,7 @@ class HybridHeatingController:
         if not self._forecast_busy and (
                 self._last_forecast_calc is None or now - self._last_forecast_calc >= FORECAST_EVERY):
             self._last_forecast_calc = now
-            self.hass.async_create_task(self._async_forecast(inputs, controlling, now))
+            self.hass.async_create_task(self._async_forecast(inputs, controlling, now, raw_inputs))
 
         # learning + costs
         dhw = False
@@ -620,9 +629,41 @@ class HybridHeatingController:
         self.explore_log = self.explore_log[-20:]
         self._save()
 
-    async def _async_forecast(self, inputs: Inputs, controlling: bool, now: datetime) -> None:
+    def _apply_setback(self, inputs: Inputs, now: datetime) -> None:
+        """Use the smart setback level (if any) instead of the fixed eco temperature."""
+        sb = self.setback
+        if (not sb or not self.features.get("smart_setback") or inputs.mode != "auto"
+                or now.timestamp() * 1000 >= sb["until"]):
+            return
+        if sb["level"] is not None:
+            inputs.eco_temp = sb["level"]
+            inputs.night = None
+
+    async def _async_forecast(self, inputs: Inputs, controlling: bool, now: datetime,
+                              raw_inputs: Inputs | None = None) -> None:
         self._forecast_busy = True
         try:
+            if (raw_inputs is not None and self.features.get("smart_setback")
+                    and (self._last_setback is None or now - self._last_setback >= SETBACK_EVERY
+                         or (self.setback and now.timestamp() * 1000 >= self.setback["until"]))):
+                self._last_setback = now
+                raw = copy.copy(raw_inputs)
+                raw.explore_source = None
+                if raw.mode == "off":
+                    raw.mode = "auto"   # learn only: show what it would choose
+                new = await self.hass.async_add_executor_job(
+                    choose_setback, raw, self.model, float(self.settings["setback_max"]), True)
+                old = self.setback
+                if (new and old and old["level"] != new["level"] and old["until"] == new["until"]):
+                    # keep the current choice unless switching clearly pays off
+                    old_cost = next((o["cost"] for o in new["options"] if o["level"] == old["level"]), None)
+                    if old_cost is not None and old_cost - new["cost"] < 0.05:
+                        new = {**new, "level": old["level"], "cost": old_cost}
+                self.setback = new
+                inputs = copy.copy(raw_inputs)
+                self._apply_setback(inputs, now)
+            elif not self.features.get("smart_setback"):
+                self.setback = None
             base = copy.copy(inputs)
             base.explore_source = None   # the forecast shows normal operation
             planner = copy.deepcopy(self.planner)
@@ -926,6 +967,7 @@ class HybridHeatingController:
             "forecast": self.forecast_result,
             "forecast_hypothetical": self.forecast_hypothetical,
             "scenarios": self.scenarios,
+            "setback": self.setback if self.features.get("smart_setback") else None,
             "explore": {
                 "active": self.feature_active("explore"),
                 "session": ({**self.explore, "since": self.explore["since"].isoformat()}

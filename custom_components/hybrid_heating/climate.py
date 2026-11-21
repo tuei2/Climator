@@ -69,6 +69,7 @@ class HybridClimate(HybridEntity, ClimateEntity):
             "strategy": d.strategy,
             "fan": d.fan,
             "exploring": d.exploring,
+            "smart_setback": (self.ctrl.setback or {}).get("level") if self.ctrl.setback else None,
             "phase": d.phase,
             "reason": d.reason,
             "preheat_start": d.preheat_start.isoformat() if d.preheat_start else None,

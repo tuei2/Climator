@@ -240,6 +240,9 @@
       },
       "feature_night": {
         "name": "Function: off at night"
+      },
+      "feature_smart_setback": {
+        "name": "Function: smart night temperature"
       }
     }
   },

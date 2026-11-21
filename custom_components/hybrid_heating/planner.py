@@ -511,3 +511,67 @@ def what_if(planner: Planner, base: Inputs, model: ThermalModel, hours: float = 
     out.sort(key=lambda x: x["delta_week"])
     return {"base": {"cost": ref["cost"], "week": round(ref["cost"] * week, 2),
                      "deficit_h": ref["deficit_h"]}, "scenarios": out, "hours": hours}
+
+
+def _comfort_end(schedule: dict, now: datetime) -> datetime:
+    t = now
+    limit = now + timedelta(hours=24)
+    while comfort_at(schedule, t) is not None and t < limit:
+        t += timedelta(minutes=15)
+    return t
+
+
+def choose_setback(base: Inputs, model: ThermalModel, max_temp: float, include_off: bool,
+                   step: float = 0.5) -> dict | None:
+    """Smart night/eco temperature.
+
+    For the coming setback period (from the end of the current comfort block, or now, until the
+    next comfort block starts) every level from the eco temperature up to max_temp is simulated
+    with the model and the weather forecast, including heating up again. The cheapest level that
+    is just as comfortable wins. With "off at night" enabled, keeping the night window off is one
+    of the options. `base` must carry the user's own eco temperature and night window.
+    """
+    if base.mode != "auto" or base.t_in is None or base.t_out is None or base.presence != "home":
+        return None
+    now = base.now
+    eco_start = _comfort_end(base.schedule, now)
+    nb = next_block(base.schedule, eco_start)
+    if not nb:
+        return None
+    end = nb[0] + timedelta(hours=2)
+    hours = (end - now).total_seconds() / 3600
+    if hours <= 0.5 or hours > 36:
+        return None
+    variants: list[tuple[float | None, Inputs]] = []
+    if include_off and base.night is not None:
+        variants.append((None, copy.copy(base)))
+    lvl = base.eco_temp
+    while lvl <= max_temp + 1e-6:
+        v = copy.copy(base)
+        v.eco_temp, v.night = round(lvl * 2) / 2, None
+        variants.append((v.eco_temp, v))
+        lvl += step
+    options = []
+    for level, v in variants:
+        r = forecast(Planner(), v, model, hours, 15)
+        if r["cost"] is None:
+            continue
+        options.append({"level": level, "cost": r["cost"], "deficit_h": r["deficit_h"],
+                        "split": r["split"]})
+    if not options:
+        return None
+    least_deficit = min(o["deficit_h"] for o in options)
+    ok = [o for o in options if o["deficit_h"] <= least_deficit + 0.1]
+    best = min(ok, key=lambda o: (round(o["cost"], 3), -1 if o["level"] is None else o["level"]))
+    baseline = options[0]  # the user's own setting: "off at night" if enabled, else eco
+    # only deviate from the user's own setting when it clearly pays off
+    if baseline in ok and baseline["cost"] - best["cost"] < max(0.03, 0.02 * baseline["cost"]):
+        best = baseline
+    return {
+        "level": best["level"], "cost": best["cost"], "options": options,
+        "baseline_level": baseline["level"], "baseline_cost": baseline["cost"],
+        "saving": round(baseline["cost"] - best["cost"], 3),
+        "from": int(eco_start.timestamp() * 1000), "until": int(nb[0].timestamp() * 1000),
+        "comfort_temp": nb[1], "hours": round(hours, 1), "t_out_min": round(min(
+            base.outdoor(now + timedelta(hours=h)) for h in range(int(hours) + 1)), 1),
+    }
