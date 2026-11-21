@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import MODE_AUTO, MODE_HEAT, MODE_OFF
 from .entity import HybridEntity
-from .planner import PHASE_HEAT, PHASE_OFF
+from .planner import PHASE_HEAT, PHASE_OFF, PHASE_PAUSED
 
 MODE_MAP = {MODE_OFF: HVACMode.OFF, MODE_HEAT: HVACMode.HEAT, MODE_AUTO: HVACMode.AUTO}
 
@@ -58,7 +58,7 @@ class HybridClimate(HybridEntity, ClimateEntity):
     @property
     def hvac_action(self) -> HVACAction:
         phase = self.ctrl.decision.phase
-        if phase == PHASE_OFF:
+        if phase in (PHASE_OFF, PHASE_PAUSED):
             return HVACAction.OFF
         return HVACAction.HEATING if phase == PHASE_HEAT else HVACAction.IDLE
 

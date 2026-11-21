@@ -18,12 +18,16 @@ views:
           - sensor.climator_reason
           - sensor.climator_preheat_start
       - type: entities
-        title: Schedule
+        title: Temperatures & presence
         entities:
-          - number.climator_comfort_temp
           - number.climator_eco_temp
-          - time.climator_comfort_start
-          - time.climator_comfort_end
+          - number.climator_away_temp
+          - number.climator_vacation_temp
+          - switch.climator_vacation
+          - switch.climator_guest
+          - sensor.climator_presence
+          - sensor.climator_comfort_score
+          - sensor.climator_expected_cost_24h
       - type: entities
         title: Energy prices
         entities:
@@ -71,12 +75,18 @@ views:
           - sensor.climator_maintain_cost_airco
           - sensor.climator_maintain_cost_cv
 
-  - title: Learning
-    path: learning
-    icon: mdi:school
+  - title: Model
+    path: model
+    icon: mdi:chart-bell-curve
     cards:
       - type: glance
-        title: Heat-up rate at current outdoor temperature
+        title: Model health
+        entities:
+          - sensor.climator_model_accuracy
+          - sensor.climator_diagnostics
+          - sensor.climator_learning
+      - type: glance
+        title: Heat-up rate right now
         entities:
           - sensor.climator_heat_rate_airco
           - sensor.climator_heat_rate_cv
@@ -87,24 +97,26 @@ views:
           - sensor.climator_heat_cost_airco
           - sensor.climator_heat_cost_cv
           - sensor.climator_heat_cost_both
-      - type: statistics-graph
-        title: Learned heat-up rate over time
-        chart_type: line
-        period: day
-        days_to_show: 60
-        stat_types: [mean]
-        entities:
-          - sensor.climator_heat_rate_airco
-          - sensor.climator_heat_rate_cv
-          - sensor.climator_heat_rate_both
       - type: markdown
-        title: Learned data per outdoor temperature
+        title: Learned parameters
         content: >-
-          {% set t = state_attr('sensor.climator_learning', 'table') or [] %}
-          {% if t | count == 0 %}Nothing learned yet. Samples so far: {{ states('sensor.climator_learning') }}{% else %}
-          | Source | Outdoor | Heat-up | € per °C | € per h per K | Samples (heat/keep) |
-          |---|---|---|---|---|---|
-          {% for r in t %}| {{ r.strategy }} | {{ r.outdoor }} °C | {{ r.rate }} °C/h | {{ r.cost_per_deg }} | {{ r.maintain_cost_per_hour_per_k }} | {{ r.heat_samples }} / {{ r.maintain_samples }} |
-          {% endfor %}
-          Last event: {{ state_attr('sensor.climator_learning', 'last_event') or '-' }}
-          {% endif %}
+          {% set p = state_attr('sensor.climator_learning', 'parameters') or {} %}
+          {% set c = state_attr('sensor.climator_learning', 'confidence') or {} %}
+          | Parameter | Value | Confidence |
+          |---|---|---|
+          | Heat loss (1/h) | {{ p.k }} | {{ c.k }} |
+          | Air conditioner gain (°C/h per kW) | {{ p.ga0 }} + {{ p.ga1 }} × T_out | {{ c.ga0 }} |
+          | Boiler gain (°C/h per m³/h) | {{ p.gc }} | {{ c.gc }} |
+          | Solar gain (°C/h per kW) | {{ p.gs }} | {{ c.gs }} |
+
+          The Climator sidebar panel (tab *Model*) explains these values in plain language.
+      - type: entities
+        title: Functions
+        entities:
+          - switch.climator_feature_windows
+          - switch.climator_feature_presence
+          - switch.climator_feature_forecast
+          - switch.climator_feature_buffer
+          - switch.climator_feature_solar
+          - switch.climator_feature_notifications
+          - switch.climator_feature_suggestions

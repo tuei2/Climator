@@ -14,7 +14,8 @@ from .entity import HybridEntity
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback):
     ctrl = entry.runtime_data
     async_add_entities([
-        TempNumber(ctrl, "comfort_temp"), TempNumber(ctrl, "eco_temp"),
+        TempNumber(ctrl, "eco_temp"), TempNumber(ctrl, "away_temp"),
+        TempNumber(ctrl, "vacation_temp"),
         PriceNumber(ctrl, CONF_PRICE_KWH, "EUR/kWh", 2.0),
         PriceNumber(ctrl, CONF_PRICE_GAS, "EUR/m³", 5.0),
     ])
@@ -22,7 +23,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
 
 class TempNumber(HybridEntity, NumberEntity):
     _platform_domain = "number"
-    _attr_native_min_value = 10
+    _attr_native_min_value = 5
     _attr_native_max_value = 25
     _attr_native_step = 0.5
     _attr_mode = NumberMode.BOX

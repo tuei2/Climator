@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .entity import HybridEntity
 from .planner import (
-    BIN_LABELS, PHASE_HEAT, PHASE_MAINTAIN, PHASE_OFF, REASONS, STRAT_AIRCO, STRAT_BOTH,
+    PHASE_HEAT, PHASE_MAINTAIN, PHASE_OFF, PHASE_PAUSED, REASONS, STRAT_AIRCO, STRAT_BOTH,
     STRAT_CV, STRAT_OFF, STRATEGIES,
 )
 
@@ -27,7 +27,8 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
         CostTotalSensor(ctrl, STRAT_AIRCO), CostTotalSensor(ctrl, STRAT_CV),
         CostTotalSensor(ctrl, "total"), LearningSensor(ctrl),
         CostTodaySensor(ctrl, STRAT_AIRCO), CostTodaySensor(ctrl, STRAT_CV),
-        CostTodaySensor(ctrl, "total"),
+        CostTodaySensor(ctrl, "total"), ComfortSensor(ctrl), AccuracySensor(ctrl),
+        DiagnosticsSensor(ctrl), ExpectedCostSensor(ctrl), PresenceSensor(ctrl),
     ]
     for s in STRATEGIES:
         entities += [HeatRateSensor(ctrl, s), HeatCostSensor(ctrl, s)]
@@ -65,7 +66,7 @@ class StrategySensor(_Sensor):
 
 class PhaseSensor(_Sensor):
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = [PHASE_HEAT, PHASE_MAINTAIN, PHASE_OFF]
+    _attr_options = [PHASE_HEAT, PHASE_MAINTAIN, PHASE_OFF, PHASE_PAUSED]
 
     def __init__(self, ctrl) -> None:
         super().__init__(ctrl, "phase")
@@ -157,7 +158,7 @@ class CostTodaySensor(_Sensor):
 
 
 class HeatRateSensor(_Sensor):
-    """Learned heat-up speed at the current outdoor temperature."""
+    """Expected heat-up speed right now (model, full power, after losses)."""
 
     _attr_native_unit_of_measurement = "°C/h"
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -169,19 +170,16 @@ class HeatRateSensor(_Sensor):
 
     @property
     def native_value(self) -> float | None:
-        if self.ctrl.t_out is None:
+        c = self.ctrl
+        if c.t_out is None or c.t_in is None:
             return None
-        return round(self.ctrl.model.params(self._strategy, self.ctrl.t_out)["rate"], 3)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        if self.ctrl.t_out is None:
-            return {}
-        return {"learned": self.ctrl.model.params(self._strategy, self.ctrl.t_out)["learned"]}
+        m = c.model
+        return round(m.slope(c.t_in, c.t_out, m.heat_rate(self._strategy, c.t_out),
+                             c.solar_kw or 0.0), 3)
 
 
 class HeatCostSensor(_Sensor):
-    """Learned cost to raise the room 1 °C at the current outdoor temperature."""
+    """Cost to raise the room 1 °C with this source at the current outdoor temperature."""
 
     _attr_native_unit_of_measurement = "EUR/°C"
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -193,43 +191,108 @@ class HeatCostSensor(_Sensor):
 
     @property
     def native_value(self) -> float | None:
-        if self.ctrl.t_out is None:
+        c = self.ctrl
+        if c.t_out is None:
             return None
-        p = self.ctrl.model.params(self._strategy, self.ctrl.t_out)
-        pr = self.ctrl.prices
-        return round(p["kwh_per_deg"] * pr.kwh + p["m3_per_deg"] * pr.gas, 4)
+        m, p = c.model, c.prices
+        srcs = ["airco", "cv"] if self._strategy == "both" else [self._strategy]
+        cost_h = sum(m.pmax[s] * (p.kwh if s == "airco" else p.gas) for s in srcs)
+        return round(cost_h / max(m.heat_rate(self._strategy, c.t_out), 1e-3), 4)
 
 
 class LearningSensor(_Sensor):
-    _unrecorded_attributes = frozenset({"table", "last_event"})
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _unrecorded_attributes = frozenset({"parameters", "confidence", "excluded"})
 
     def __init__(self, ctrl) -> None:
         super().__init__(ctrl, "learning")
 
     @property
     def native_value(self) -> int:
-        return self.ctrl.model.sample_count()
+        return round(self.ctrl.model.n_eff)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        model = self.ctrl.model
-        pr = self.ctrl.prices
-        table = []
-        for strat in STRATEGIES:
-            for idx, label in enumerate(BIN_LABELS):
-                b = model.data.get(strat, {}).get(str(idx))
-                if not b or (b.get("n_heat", 0) + b.get("n_maint", 0)) == 0:
-                    continue
-                table.append({
-                    "strategy": strat,
-                    "outdoor": label,
-                    "heat_samples": b.get("n_heat", 0),
-                    "maintain_samples": b.get("n_maint", 0),
-                    "rate": round(b["rate"], 2),
-                    "cost_per_deg": round(b["kwh_per_deg"] * pr.kwh + b["m3_per_deg"] * pr.gas, 3),
-                    "maintain_cost_per_hour_per_k": round(
-                        b["kwh_per_hk"] * pr.kwh + b["m3_per_hk"] * pr.gas, 4),
-                })
-        return {"last_event": self.ctrl.learner.last_event, "table": table}
+        m = self.ctrl.model
+        return {"parameters": {k: round(v, 4) for k, v in m.theta.items()},
+                "confidence": m.confidence(), "excluded": m.excluded,
+                "last_sample": self.ctrl.last_sample_reason}
+
+
+class ComfortSensor(_Sensor):
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, ctrl) -> None:
+        super().__init__(ctrl, "comfort_score")
+
+    @property
+    def native_value(self) -> float | None:
+        return self.ctrl.comfort_score(1)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"last_7_days": self.ctrl.comfort_score(7)}
+
+
+class AccuracySensor(_Sensor):
+    """Average error of a 1-hour-ahead model prediction over the last 3 days."""
+
+    _attr_native_unit_of_measurement = "°C"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, ctrl) -> None:
+        super().__init__(ctrl, "model_accuracy")
+
+    @property
+    def native_value(self) -> float | None:
+        mae = self.ctrl.model.check()["mae_1h"]
+        return round(mae, 3) if mae is not None else None
+
+
+class DiagnosticsSensor(_Sensor):
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _unrecorded_attributes = frozenset({"checks"})
+
+    def __init__(self, ctrl) -> None:
+        super().__init__(ctrl, "diagnostics")
+
+    @property
+    def native_value(self) -> int:
+        return sum(1 for d in self.ctrl.diagnostics() if d["status"] in ("warn", "error"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"checks": {d["id"]: d["status"] for d in self.ctrl.diagnostics()}}
+
+
+class ExpectedCostSensor(_Sensor):
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, ctrl) -> None:
+        super().__init__(ctrl, "expected_cost_24h")
+
+    @property
+    def native_value(self) -> float | None:
+        return self.ctrl.forecast_result.get("cost")
+
+
+class PresenceSensor(_Sensor):
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["home", "away", "vacation"]
+
+    def __init__(self, ctrl) -> None:
+        super().__init__(ctrl, "presence")
+
+    @property
+    def native_value(self) -> str:
+        return self.ctrl.presence
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"open_windows": self.ctrl.open_windows, "window_paused": self.ctrl.window_open}

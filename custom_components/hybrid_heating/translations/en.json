@@ -12,7 +12,11 @@
           "cv_climate": "Boiler thermostat (climate)",
           "airco_energy_sensor": "Air conditioner energy (kWh, total increasing)",
           "gas_sensor": "Gas meter (m³, total increasing)",
-          "dhw_sensor": "Hot water active (optional)"
+          "dhw_sensor": "Hot water active (optional)",
+          "window_sensors": "Window/door sensors (optional)",
+          "presence_entities": "Presence: persons/trackers (optional)",
+          "weather_entity": "Weather forecast (optional)",
+          "solar_sensor": "Solar panel power (optional)"
         }
       }
     },
@@ -42,7 +46,16 @@
           "preheat_margin_minutes": "Preheat margin",
           "min_switch_minutes": "Min. time between source switches",
           "hysteresis": "Hysteresis",
-          "override_minutes": "Pause after manual change (0 = Climator overrides)"
+          "override_minutes": "Pause after manual change (0 = Climator overrides)",
+          "window_sensors": "Window/door sensors (optional)",
+          "presence_entities": "Presence: persons/trackers (optional)",
+          "weather_entity": "Weather forecast (optional)",
+          "solar_sensor": "Solar panel power (optional)",
+          "window_delay_minutes": "Pause heating after window open for",
+          "away_delay_minutes": "Away after everyone left for",
+          "buffer_degrees": "Heat buffer: extra degrees",
+          "buffer_threshold_percent": "Heat buffer: minimum saving",
+          "notify_after_minutes": "Notify when a device is unavailable for"
         }
       }
     },
@@ -66,7 +79,8 @@
         "state": {
           "heat_up": "Heating up",
           "maintain": "Maintaining",
-          "off": "Off"
+          "off": "Off",
+          "paused": "Paused"
         }
       },
       "reason": {
@@ -80,7 +94,11 @@
           "preheat": "Preheating",
           "manual": "Manual temperature",
           "learn_only": "Learn only",
-          "manual_override": "Paused: manual change"
+          "manual_override": "Paused: manual change",
+          "window_open": "Window open",
+          "away": "Away",
+          "vacation": "Vacation",
+          "buffer": "Buffering heat"
         }
       },
       "preheat_start": {
@@ -111,13 +129,13 @@
         "name": "Heating cost today"
       },
       "heat_rate_airco": {
-        "name": "Heat-up rate air conditioner"
+        "name": "Heat-up rate air conditioner (now)"
       },
       "heat_rate_cv": {
-        "name": "Heat-up rate boiler"
+        "name": "Heat-up rate boiler (now)"
       },
       "heat_rate_both": {
-        "name": "Heat-up rate both"
+        "name": "Heat-up rate both (now)"
       },
       "heat_cost_airco": {
         "name": "Heat-up cost per °C air conditioner"
@@ -129,29 +147,44 @@
         "name": "Heat-up cost per °C both"
       },
       "learning": {
-        "name": "Learning data"
+        "name": "Samples in model"
+      },
+      "comfort_score": {
+        "name": "Comfort score today"
+      },
+      "model_accuracy": {
+        "name": "Model error (1 hour ahead)"
+      },
+      "diagnostics": {
+        "name": "Diagnostics: warnings"
+      },
+      "expected_cost_24h": {
+        "name": "Expected heating cost 24 h"
+      },
+      "presence": {
+        "name": "Presence",
+        "state": {
+          "home": "Home",
+          "away": "Away",
+          "vacation": "Vacation"
+        }
       }
     },
     "number": {
-      "comfort_temp": {
-        "name": "Comfort temperature"
-      },
       "eco_temp": {
-        "name": "Eco temperature"
+        "name": "Temperature outside schedule (eco)"
       },
       "price_kwh": {
         "name": "Electricity price"
       },
       "price_gas": {
         "name": "Gas price"
-      }
-    },
-    "time": {
-      "comfort_start": {
-        "name": "Comfort from"
       },
-      "comfort_end": {
-        "name": "Comfort until"
+      "away_temp": {
+        "name": "Away temperature"
+      },
+      "vacation_temp": {
+        "name": "Vacation temperature"
       }
     },
     "select": {
@@ -163,12 +196,59 @@
           "schedule": "Schedule + preheat"
         }
       }
+    },
+    "switch": {
+      "vacation": {
+        "name": "Vacation"
+      },
+      "guest": {
+        "name": "Guests (ignore away)"
+      },
+      "feature_windows": {
+        "name": "Function: window detection"
+      },
+      "feature_presence": {
+        "name": "Function: presence"
+      },
+      "feature_forecast": {
+        "name": "Function: weather forecast"
+      },
+      "feature_buffer": {
+        "name": "Function: heat buffer"
+      },
+      "feature_solar": {
+        "name": "Function: solar gain"
+      },
+      "feature_notifications": {
+        "name": "Function: notifications"
+      },
+      "feature_suggestions": {
+        "name": "Function: suggestions"
+      }
     }
   },
   "services": {
     "reset_learning": {
-      "name": "Reset learning data",
-      "description": "Clears all learned data."
+      "name": "Reset data",
+      "description": "Clears learned data or statistics.",
+      "fields": {
+        "scope": {
+          "name": "What to reset",
+          "description": "Part to reset."
+        }
+      }
+    }
+  },
+  "selector": {
+    "reset_scope": {
+      "options": {
+        "all": "Everything",
+        "model": "Thermal model",
+        "costs": "Costs",
+        "comfort": "Comfort score",
+        "suggestions": "Suggestions",
+        "weather": "Weather correction"
+      }
     }
   }
 }

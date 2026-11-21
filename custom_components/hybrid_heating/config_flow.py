@@ -11,6 +11,8 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector as sel
 
 from .const import (
+    CONF_AWAY_DELAY, CONF_BUFFER_DEG, CONF_BUFFER_THRESHOLD, CONF_NOTIFY_AFTER, CONF_PRESENCE,
+    CONF_SOLAR, CONF_WEATHER, CONF_WINDOW_DELAY, CONF_WINDOWS,
     CONF_AIRCO, CONF_AIRCO_ENERGY, CONF_AIRCO_MIN_OUTDOOR, CONF_AIRCO_OFFSET,
     CONF_ALLOW_BOTH, CONF_CV, CONF_CV_OFFSET, CONF_CV_SETBACK, CONF_DHW, CONF_GAS,
     CONF_HYSTERESIS, CONF_MAX_HEATUP, CONF_MAX_PREHEAT, CONF_MIN_SWITCH, CONF_NAME,
@@ -19,11 +21,11 @@ from .const import (
 )
 
 
-def _ent(domain: str, device_class: str | None = None) -> sel.EntitySelector:
-    cfg = sel.EntitySelectorConfig(domain=domain)
+def _ent(domain, device_class: str | None = None, multiple: bool = False) -> sel.EntitySelector:
+    kw = {"domain": domain, "multiple": multiple}
     if device_class:
-        cfg = sel.EntitySelectorConfig(domain=domain, device_class=device_class)
-    return sel.EntitySelector(cfg)
+        kw["device_class"] = device_class
+    return sel.EntitySelector(sel.EntitySelectorConfig(**kw))
 
 
 def _num(lo, hi, step, unit=None) -> sel.NumberSelector:
@@ -45,6 +47,15 @@ def _entity_schema(d: dict) -> dict:
         vol.Required(CONF_GAS, default=d.get(CONF_GAS, vol.UNDEFINED)): _ent("sensor"),
         vol.Optional(CONF_DHW, description={"suggested_value": d.get(CONF_DHW)}):
             _ent("binary_sensor"),
+        vol.Optional(CONF_WINDOWS, description={"suggested_value": d.get(CONF_WINDOWS)}):
+            _ent("binary_sensor", multiple=True),
+        vol.Optional(CONF_PRESENCE, description={"suggested_value": d.get(CONF_PRESENCE)}):
+            _ent(["person", "device_tracker", "binary_sensor", "input_boolean", "group", "zone"],
+                 multiple=True),
+        vol.Optional(CONF_WEATHER, description={"suggested_value": d.get(CONF_WEATHER)}):
+            _ent("weather"),
+        vol.Optional(CONF_SOLAR, description={"suggested_value": d.get(CONF_SOLAR)}):
+            _ent("sensor", "power"),
     }
 
 
@@ -64,6 +75,11 @@ def _option_schema(o: dict) -> dict:
         vol.Required(CONF_HYSTERESIS, default=g(CONF_HYSTERESIS)): _num(0.1, 2, 0.1, "°C"),
         vol.Required(CONF_OVERRIDE_MINUTES, default=g(CONF_OVERRIDE_MINUTES)):
             _num(0, 1440, 15, "min"),
+        vol.Required(CONF_WINDOW_DELAY, default=g(CONF_WINDOW_DELAY)): _num(0, 60, 1, "min"),
+        vol.Required(CONF_AWAY_DELAY, default=g(CONF_AWAY_DELAY)): _num(0, 240, 5, "min"),
+        vol.Required(CONF_BUFFER_DEG, default=g(CONF_BUFFER_DEG)): _num(0.5, 2, 0.5, "°C"),
+        vol.Required(CONF_BUFFER_THRESHOLD, default=g(CONF_BUFFER_THRESHOLD)): _num(5, 50, 5, "%"),
+        vol.Required(CONF_NOTIFY_AFTER, default=g(CONF_NOTIFY_AFTER)): _num(5, 1440, 5, "min"),
     }
 
 

@@ -1,12 +1,12 @@
 # Climator
 
 Cost-optimised hybrid heating for Home Assistant: combines an air conditioner (air-to-air
-heat pump) with a gas boiler thermostat. Climator learns how fast and at what cost each
-source heats your room, per outdoor temperature, picks the cheapest way to heat up and to
-keep the room warm, and preheats so the room is warm at the time you set.
+heat pump) with a gas boiler thermostat. Climator learns a physical model of your room,
+picks the cheapest way to heat up and to keep warm, and preheats so the room is warm at the
+time you set.
 
 Works with any `climate` entity (tested with a Daikin + Faikin and a Plugwise Anna).
-The integration UI is available in **English and Dutch**.
+The integration and its panel are available in **English and Dutch**.
 
 ## Installation (HACS)
 1. HACS → ⋮ → *Custom repositories* → `https://github.com/tuei2/Climator`, type *Integration*.
@@ -22,80 +22,123 @@ The integration UI is available in **English and Dutch**.
 | Boiler thermostat | `climate.anna` |
 | Air conditioner energy (kWh, total increasing) | Faikin energy sensor, or an *Integral* helper on its power |
 | Gas meter (m³, total increasing) | P1/DSMR gas meter reading |
-| Hot water active (optional) | Plugwise `binary_sensor …dhw_state` — excludes shower gas from learning and costs |
+| Hot water active *(optional)* | Plugwise `binary_sensor …dhw_state` — excludes shower gas from learning and costs |
+| Window/door sensors *(optional)* | binary sensors of the room |
+| Presence *(optional)* | `person.*`, device trackers, binary sensors or input booleans |
+| Weather forecast *(optional)* | any `weather.*` entity with an hourly forecast |
+| Solar panel power *(optional)* | inverter power sensor (W or kW) |
 
-Advanced settings (offsets, setback temperature, pause after manual change, …) are under
-**Configure** on the integration.
+Optional entities can be added or removed later via **Configure** on the integration, where
+you also find the advanced settings (offsets, delays, buffer size, …).
+
+## How the model works
+Climator describes the room with one simple physics equation, in °C per hour:
+
+```
+dT/dt = − k · (T_room − T_outside)          heat loss
+        + (ga0 + ga1 · T_outside) · P_airco  air conditioner (P in kW electric)
+        + gc · G_cv                           boiler (G in m³ gas per hour)
+        + gs · S                              sun (S = solar panel power in kW)
+```
+
+Every 15 minutes it takes a sample (room and outdoor temperature, airco energy, gas, solar)
+and updates the parameters with weighted least squares — **in every mode, also in Learn only
+and while the heating is off** (cooling down teaches it the heat loss). Older data slowly
+fades out (half-life about a week). Until there is enough data, sensible defaults are used.
+Samples are skipped when hot water is running, a window is open, a meter jumps or data is missing.
+
+With the model Climator can:
+- calculate how long each source needs to heat up and what it costs;
+- calculate the cost per hour to keep the room warm with each source;
+- simulate the coming 24 hours (expected room temperature, plan and cost);
+- find the latest preheat start that still reaches the comfort temperature in time.
+
+### Is the model right?
+The **Model** tab of the panel shows:
+- **prediction error** — every sample, Climator predicts one hour ahead and compares with
+  reality (good ≤ 0.3 °C);
+- a **reality vs model** chart of the last 48 hours;
+- every learned value **in plain language** with a confidence level (none / low / medium / high)
+  and its uncertainty (±);
+- **which source is cheaper at which outdoor temperature**;
+- **checks**: sensors available, meters counting while heating, model values plausible,
+  enough usable data, forecast received;
+- skipped samples per reason, suggestions, and reset buttons per part.
+
+## Functions — each can be switched off
+| Function | What it does | Needs |
+|---|---|---|
+| Window detection | Pauses heating while a window/door is open (after a delay) | window sensors |
+| Presence | Away temperature when nobody is home (after a delay); *Guests* switch ignores it | presence entities |
+| Weather forecast | Uses the hourly forecast (corrected for your own sensor) for preheating and the 24-hour plan | weather entity |
+| Heat buffer | Stores a little extra heat when the airco is clearly cheaper now than later in the comfort period | weather entity (off by default) |
+| Solar gain | Learns how much the sun warms the room | solar power sensor |
+| Notifications | Persistent notification when a sensor or device is unavailable | — |
+| Suggestions | After 1–2 weeks: frequent manual changes, low comfort, windows, model accuracy, break-even temperature | — |
+
+Switch them in the panel (**Settings → Functions**) or with `switch.climator_feature_*`.
+A function that is on but has no entity configured simply does nothing.
+
+## Schedule
+A week schedule with a **workday** and a **weekend** profile, each with comfort blocks
+(start, end, temperature) that can be switched on/off individually. Assign each weekday to a
+profile, or switch the weekend profile off to use the workday profile every day. Outside the
+blocks the *eco* temperature applies. Edit it in the panel (**Settings → Schedule**).
+
+Vacation (`switch.climator_vacation`) uses the vacation temperature and ignores the schedule.
+
+## Modes
+| Mode | Behaviour |
+|---|---|
+| Learn only | Controls nothing, only learns (also `climate.climator` *off*) |
+| Fixed temperature | Keeps the temperature set on `climate.climator` |
+| Schedule + preheat | Follows the schedule and preheats |
+
+When you change the air conditioner or boiler yourself (remote, dial, app), Climator pauses
+(default 120 minutes) and keeps learning.
+
+## Climator panel
+A **Climator** item in the sidebar with four tabs: **Status** (live values, chart with past and
+expected temperature, plan and outdoor forecast), **Costs** (per day/month), **Model** (see
+above) and **Settings** (mode, schedule, functions, presence, prices).
 
 ## Entities
-All entities have fixed ids starting with `climator_`, independent of language.
+All entity ids are fixed and start with `climator_`.
 
 | Entity | Purpose |
 |---|---|
-| `climate.climator` | Off = learn only, Heat = fixed temperature, Auto = schedule + preheat |
-| `select.climator_mode` | Same modes: *Learn only*, *Manual temperature*, *Schedule + preheat* |
-| `number.climator_price_kwh`, `number.climator_price_gas` | **Energy prices** used for every decision |
-| `number.climator_comfort_temp`, `number.climator_eco_temp` | Schedule temperatures |
-| `time.climator_comfort_start`, `time.climator_comfort_end` | Comfort period |
-| `sensor.climator_strategy` / `_phase` / `_reason` | What Climator is doing and why |
+| `climate.climator`, `select.climator_mode` | Mode and fixed temperature |
+| `number.climator_price_kwh`, `number.climator_price_gas` | Energy prices used for every decision |
+| `number.climator_eco_temp`, `_away_temp`, `_vacation_temp` | Temperatures outside the schedule |
+| `switch.climator_vacation`, `switch.climator_guest` | Vacation and guest mode |
+| `switch.climator_feature_*` | Optional functions on/off |
+| `sensor.climator_strategy` / `_phase` / `_reason` / `_presence` | What Climator does and why |
 | `sensor.climator_preheat_start` | When preheating starts |
-| `sensor.climator_cost_today_*` | Heating cost since midnight (air conditioner, boiler, total) |
-| `sensor.climator_cost_*` | Cumulative heating cost (long-term statistics: per day/week/month) |
-| `sensor.climator_heat_rate_*` | Learned heat-up rate (°C/h) at the current outdoor temperature |
-| `sensor.climator_heat_cost_*` | Learned cost to heat up 1 °C |
-| `sensor.climator_maintain_cost_*` | Cost per hour to keep the room at temperature |
-| `sensor.climator_learning` | Number of learned samples; attribute `table` holds all learned data |
+| `sensor.climator_cost_today_*`, `sensor.climator_cost_*` | Heating cost today and cumulative (statistics) |
+| `sensor.climator_expected_cost_24h` | Expected heating cost for the next 24 hours |
+| `sensor.climator_comfort_score` | % of comfort time the room was warm enough (today, 7 days) |
+| `sensor.climator_model_accuracy` | Average 1-hour-ahead prediction error |
+| `sensor.climator_diagnostics` | Number of failed checks |
+| `sensor.climator_heat_rate_*`, `sensor.climator_heat_cost_*` | Heat-up speed now and cost per °C |
+| `sensor.climator_maintain_cost_*` | Cost per hour to keep warm |
+| `sensor.climator_learning` | Samples in the model; attributes hold the parameters |
 
-Service `hybrid_heating.reset_learning` clears the learned data.
-
-## Climator panel
-After installation a **Climator** item appears in the sidebar: a dedicated dashboard page
-(English or Dutch, following your Home Assistant language) with four tabs:
-
-- **Status** — room, outdoor, current heat source, preheat time, cost today, and a temperature
-  chart: room, target, outdoor and device setpoints, coloured bands showing which source was
-  heating, and the planned target for the coming hours.
-- **Costs** — heating cost today, yesterday, last 7/30 days, per day (30 days) and per month,
-  split into air conditioner and boiler.
-- **Learning** — cheapest source right now, learned heat-up rate and costs, coverage per
-  outdoor temperature band and the full learned data table.
-- **Settings** — mode, schedule, energy prices and a link to the advanced settings.
-
-## Lovelace dashboard (optional)
-[`dashboards/climator.yaml`](dashboards/climator.yaml) contains a ready-made dashboard with
-three views: **Status**, **Costs** (cost per day and per month) and **Learning** (learned
-rates, costs and a table per outdoor temperature). Create a new dashboard, open the
-*Raw configuration editor* and paste the file.
-
-## Learn only
-Set the mode to **Learn only** (or turn `climate.climator` off). Climator then controls
-nothing, but watches what the air conditioner and boiler do and learns from it. Run it like
-this for a week, then switch to *Schedule + preheat*.
-
-## Manual changes (remote, thermostat dial, app)
-When you change the air conditioner or boiler yourself while Climator is in control, it
-detects this after about 2 minutes and pauses (default 120 minutes, configurable; 0 = Climator
-reverts your change). It keeps learning during the pause. Changing Climator's own mode or
-temperature ends the pause immediately.
-
-## How decisions are made
-- **Heating up**: for each option (air conditioner, boiler, both) duration and cost are
-  calculated from the learned °C/h and kWh or m³ per °C. The cheapest option that is ready in
-  time wins; otherwise the fastest.
-- **Keeping warm**: the source with the lowest cost per hour
-  (consumption per hour per degree of indoor/outdoor difference × price).
-- **Preheating** (schedule): start = comfort start − expected heat-up time − margin.
-- The inactive air conditioner is switched off; the inactive boiler gets the setback
-  temperature (default 15 °C).
+Service `hybrid_heating.reset_learning` with `scope`: `model`, `costs`, `comfort`,
+`suggestions`, `weather` or `all`.
 
 ## Notes
 - **Plugwise Anna**: while Climator is in control it sets the Anna to *heat* (manual), which
-  disables the Anna's own schedule. In *Learn only* mode nothing is changed.
-- Learning uses measurement windows (heat-up 15–45 min, keeping warm 60 min). Until enough data
-  exists, sensible defaults are used.
+  disables the Anna's own schedule. In *Learn only* nothing is changed.
+- **Air conditioner offset**: Climator assumes the airco setpoint is 1 °C above the wanted room
+  temperature (configurable).
 - DSMR4 meters report gas only once per hour; DSMR5 (every 5 minutes) gives better results.
-- Gas costs count all gas except while hot water is active, so cooking gas is included.
+- Radiators keep heating for a while after the boiler stops; the 15-minute samples smooth this out.
+- Upgrading from 0.4 or older: the previous learning data is replaced by the new model, and the
+  single comfort block becomes the first block of the new week schedule.
+
+## Optional Lovelace dashboard
+[`dashboards/climator.yaml`](dashboards/climator.yaml) contains a dashboard built from standard cards.
 
 ## Releasing a new version
-Bump `version` in `custom_components/hybrid_heating/manifest.json` and push to `main`.
-The release workflow creates the GitHub release; HACS then offers the update.
+Bump `version` in `custom_components/hybrid_heating/manifest.json` (and `VERSION` in `const.py`)
+and push to `main`. The release workflow creates the GitHub release; HACS then offers the update.

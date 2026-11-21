@@ -12,7 +12,11 @@
           "cv_climate": "CV-thermostaat (climate)",
           "airco_energy_sensor": "Energieverbruik airco (kWh, oplopend)",
           "gas_sensor": "Gasmeter (m³, oplopend)",
-          "dhw_sensor": "Tapwater actief (optioneel)"
+          "dhw_sensor": "Tapwater actief (optioneel)",
+          "window_sensors": "Raam-/deursensoren (optioneel)",
+          "presence_entities": "Aanwezigheid: personen/trackers (optioneel)",
+          "weather_entity": "Weersverwachting (optioneel)",
+          "solar_sensor": "Vermogen zonnepanelen (optioneel)"
         }
       }
     },
@@ -42,7 +46,16 @@
           "preheat_margin_minutes": "Marge voorverwarmen",
           "min_switch_minutes": "Min. tijd tussen wisselen van bron",
           "hysteresis": "Hysterese",
-          "override_minutes": "Pauze na handmatige bediening (0 = Climator zet terug)"
+          "override_minutes": "Pauze na handmatige bediening (0 = Climator zet terug)",
+          "window_sensors": "Raam-/deursensoren (optioneel)",
+          "presence_entities": "Aanwezigheid: personen/trackers (optioneel)",
+          "weather_entity": "Weersverwachting (optioneel)",
+          "solar_sensor": "Vermogen zonnepanelen (optioneel)",
+          "window_delay_minutes": "Verwarming pauzeren als raam open staat na",
+          "away_delay_minutes": "Afwezig als iedereen weg is na",
+          "buffer_degrees": "Warmtebuffer: extra graden",
+          "buffer_threshold_percent": "Warmtebuffer: minimale besparing",
+          "notify_after_minutes": "Melding als een apparaat onbeschikbaar is na"
         }
       }
     },
@@ -66,7 +79,8 @@
         "state": {
           "heat_up": "Opwarmen",
           "maintain": "Op temperatuur houden",
-          "off": "Uit"
+          "off": "Uit",
+          "paused": "Gepauzeerd"
         }
       },
       "reason": {
@@ -80,7 +94,11 @@
           "preheat": "Voorverwarmen",
           "manual": "Handmatige temperatuur",
           "learn_only": "Alleen leren",
-          "manual_override": "Gepauzeerd: handmatig bediend"
+          "manual_override": "Gepauzeerd: handmatig bediend",
+          "window_open": "Raam open",
+          "away": "Afwezig",
+          "vacation": "Vakantie",
+          "buffer": "Warmte bufferen"
         }
       },
       "preheat_start": {
@@ -111,13 +129,13 @@
         "name": "Stookkosten vandaag"
       },
       "heat_rate_airco": {
-        "name": "Opwarmsnelheid airco"
+        "name": "Opwarmsnelheid airco (nu)"
       },
       "heat_rate_cv": {
-        "name": "Opwarmsnelheid CV"
+        "name": "Opwarmsnelheid CV (nu)"
       },
       "heat_rate_both": {
-        "name": "Opwarmsnelheid beide"
+        "name": "Opwarmsnelheid beide (nu)"
       },
       "heat_cost_airco": {
         "name": "Opwarmkosten per °C airco"
@@ -129,29 +147,44 @@
         "name": "Opwarmkosten per °C beide"
       },
       "learning": {
-        "name": "Leerdata"
+        "name": "Metingen in model"
+      },
+      "comfort_score": {
+        "name": "Comfortscore vandaag"
+      },
+      "model_accuracy": {
+        "name": "Modelafwijking (1 uur vooruit)"
+      },
+      "diagnostics": {
+        "name": "Diagnose: waarschuwingen"
+      },
+      "expected_cost_24h": {
+        "name": "Verwachte stookkosten 24 uur"
+      },
+      "presence": {
+        "name": "Aanwezigheid",
+        "state": {
+          "home": "Thuis",
+          "away": "Afwezig",
+          "vacation": "Vakantie"
+        }
       }
     },
     "number": {
-      "comfort_temp": {
-        "name": "Comforttemperatuur"
-      },
       "eco_temp": {
-        "name": "Ecotemperatuur"
+        "name": "Temperatuur buiten schema (eco)"
       },
       "price_kwh": {
         "name": "Stroomprijs"
       },
       "price_gas": {
         "name": "Gasprijs"
-      }
-    },
-    "time": {
-      "comfort_start": {
-        "name": "Comfort vanaf"
       },
-      "comfort_end": {
-        "name": "Comfort tot"
+      "away_temp": {
+        "name": "Afwezig-temperatuur"
+      },
+      "vacation_temp": {
+        "name": "Vakantietemperatuur"
       }
     },
     "select": {
@@ -163,12 +196,59 @@
           "schedule": "Schema + voorverwarmen"
         }
       }
+    },
+    "switch": {
+      "vacation": {
+        "name": "Vakantie"
+      },
+      "guest": {
+        "name": "Gasten (afwezigheid negeren)"
+      },
+      "feature_windows": {
+        "name": "Functie: raamdetectie"
+      },
+      "feature_presence": {
+        "name": "Functie: aanwezigheid"
+      },
+      "feature_forecast": {
+        "name": "Functie: weersverwachting"
+      },
+      "feature_buffer": {
+        "name": "Functie: warmtebuffer"
+      },
+      "feature_solar": {
+        "name": "Functie: zonnewinst"
+      },
+      "feature_notifications": {
+        "name": "Functie: meldingen"
+      },
+      "feature_suggestions": {
+        "name": "Functie: suggesties"
+      }
     }
   },
   "services": {
     "reset_learning": {
       "name": "Leerdata wissen",
-      "description": "Wist alle geleerde gegevens."
+      "description": "Wist geleerde gegevens of statistieken.",
+      "fields": {
+        "scope": {
+          "name": "Wat wissen",
+          "description": "Onderdeel dat gewist wordt."
+        }
+      }
+    }
+  },
+  "selector": {
+    "reset_scope": {
+      "options": {
+        "all": "Alles",
+        "model": "Thermisch model",
+        "costs": "Kosten",
+        "comfort": "Comfortscore",
+        "suggestions": "Suggesties",
+        "weather": "Weercorrectie"
+      }
     }
   }
 }

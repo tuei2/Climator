@@ -1,1 +1,14 @@
 reset_learning:
+  fields:
+    scope:
+      default: model
+      selector:
+        select:
+          translation_key: reset_scope
+          options:
+            - all
+            - model
+            - costs
+            - comfort
+            - suggestions
+            - weather

@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
+import voluptuous as vol
+
 from homeassistant.core import HomeAssistant, ServiceCall
 
 from .const import DOMAIN
 from .controller import HybridHeatingController
 from .panel import async_register_panel, async_unregister_panel
+from .websocket import async_register as async_register_ws
+
+RESET_SCOPES = ["all", "model", "costs", "comfort", "suggestions", "weather"]
 
 PLATFORMS = [
-    Platform.CLIMATE, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.TIME,
+    Platform.CLIMATE, Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH,
 ]
 
 type HybridConfigEntry = ConfigEntry[HybridHeatingController]
@@ -27,9 +32,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: HybridConfigEntry) -> bo
     if not hass.services.has_service(DOMAIN, "reset_learning"):
         async def _reset(call: ServiceCall) -> None:
             for e in hass.config_entries.async_loaded_entries(DOMAIN):
-                await e.runtime_data.async_reset_learning()
+                await e.runtime_data.async_reset(call.data.get("scope", "model"))
 
-        hass.services.async_register(DOMAIN, "reset_learning", _reset)
+        hass.services.async_register(
+            DOMAIN, "reset_learning", _reset,
+            schema=vol.Schema({vol.Optional("scope", default="model"): vol.In(RESET_SCOPES)}))
+        async_register_ws(hass)
 
     await async_register_panel(hass)
     ctrl.async_start()

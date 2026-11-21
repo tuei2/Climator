@@ -11,6 +11,10 @@ CONF_CV = "cv_climate"
 CONF_AIRCO_ENERGY = "airco_energy_sensor"
 CONF_GAS = "gas_sensor"
 CONF_DHW = "dhw_sensor"
+CONF_WINDOWS = "window_sensors"
+CONF_PRESENCE = "presence_entities"
+CONF_WEATHER = "weather_entity"
+CONF_SOLAR = "solar_sensor"
 
 ENTITY_KEYS = [
     CONF_ROOM_SENSOR,
@@ -20,7 +24,12 @@ ENTITY_KEYS = [
     CONF_AIRCO_ENERGY,
     CONF_GAS,
     CONF_DHW,
+    CONF_WINDOWS,
+    CONF_PRESENCE,
+    CONF_WEATHER,
+    CONF_SOLAR,
 ]
+OPTIONAL_ENTITY_KEYS = [CONF_DHW, CONF_WINDOWS, CONF_PRESENCE, CONF_WEATHER, CONF_SOLAR]
 
 # Options
 CONF_PRICE_KWH = "price_kwh"
@@ -36,6 +45,11 @@ CONF_PREHEAT_MARGIN = "preheat_margin_minutes"
 CONF_MIN_SWITCH = "min_switch_minutes"
 CONF_HYSTERESIS = "hysteresis"
 CONF_OVERRIDE_MINUTES = "override_minutes"
+CONF_WINDOW_DELAY = "window_delay_minutes"
+CONF_AWAY_DELAY = "away_delay_minutes"
+CONF_BUFFER_DEG = "buffer_degrees"
+CONF_BUFFER_THRESHOLD = "buffer_threshold_percent"
+CONF_NOTIFY_AFTER = "notify_after_minutes"
 
 DEFAULT_OPTIONS = {
     CONF_PRICE_KWH: 0.25,
@@ -46,11 +60,16 @@ DEFAULT_OPTIONS = {
     CONF_AIRCO_MIN_OUTDOOR: -10.0,
     CONF_ALLOW_BOTH: True,
     CONF_MAX_HEATUP: 60,
-    CONF_MAX_PREHEAT: 180,
+    CONF_MAX_PREHEAT: 240,
     CONF_PREHEAT_MARGIN: 15,
     CONF_MIN_SWITCH: 20,
     CONF_HYSTERESIS: 0.3,
     CONF_OVERRIDE_MINUTES: 120,
+    CONF_WINDOW_DELAY: 3,
+    CONF_AWAY_DELAY: 15,
+    CONF_BUFFER_DEG: 0.5,
+    CONF_BUFFER_THRESHOLD: 15,
+    CONF_NOTIFY_AFTER: 30,
 }
 
 # Runtime settings (changeable via entities, persisted in storage)
@@ -61,11 +80,17 @@ MODE_AUTO = "auto"  # schedule + preheating
 DEFAULT_SETTINGS = {
     "mode": MODE_OFF,
     "manual_target": 20.0,
-    "comfort_temp": 20.5,
     "eco_temp": 17.0,
-    "comfort_start": "07:00",
-    "comfort_end": "22:30",
+    "away_temp": 16.0,
+    "vacation_temp": 14.0,
+    "vacation": False,
+    "guest": False,
 }
+
+# Optional functions; each can be switched off (switch entity + panel).
+FEATURES = ["windows", "presence", "forecast", "buffer", "solar", "notifications", "suggestions"]
+DEFAULT_FEATURES = {f: f != "buffer" for f in FEATURES}
 
 UPDATE_INTERVAL_SECONDS = 60
 STORAGE_VERSION = 1
+VERSION = "0.5.0"
