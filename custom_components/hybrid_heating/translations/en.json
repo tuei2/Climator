@@ -1,0 +1,109 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Climator",
+        "data": {
+          "name": "Name",
+          "room_sensor": "Room temperature (source)",
+          "outdoor_sensor": "Outdoor temperature",
+          "airco_climate": "Airco (climate)",
+          "cv_climate": "Boiler thermostat (climate)",
+          "airco_energy_sensor": "Airco energy (kWh, total increasing)",
+          "gas_sensor": "Gas meter (m³, total increasing)",
+          "dhw_sensor": "Hot water active (optional)"
+        }
+      }
+    },
+    "error": {
+      "same_climate": "Airco and boiler must be different entities"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Settings",
+        "data": {
+          "room_sensor": "Room temperature (source)",
+          "outdoor_sensor": "Outdoor temperature",
+          "airco_climate": "Airco (climate)",
+          "cv_climate": "Boiler thermostat (climate)",
+          "airco_energy_sensor": "Airco energy (kWh, total increasing)",
+          "gas_sensor": "Gas meter (m³, total increasing)",
+          "dhw_sensor": "Hot water active (optional)",
+          "price_kwh": "Electricity price per kWh",
+          "price_gas": "Gas price per m³",
+          "airco_offset": "Airco setpoint offset",
+          "cv_offset": "Boiler setpoint offset",
+          "cv_setback": "Boiler setpoint when inactive",
+          "airco_min_outdoor": "Don't use airco below outdoor temp",
+          "allow_both": "Allow both simultaneously",
+          "max_heatup_minutes": "Max heat-up time for manual change",
+          "max_preheat_minutes": "Max preheat time",
+          "preheat_margin_minutes": "Preheat margin",
+          "min_switch_minutes": "Min. time between source switches",
+          "hysteresis": "Hysteresis",
+          "override_minutes": "Pause after manual override (0 = module overrides)"
+        }
+      }
+    },
+    "error": {
+      "same_climate": "Airco and boiler must be different entities"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "strategy": {
+        "name": "Strategy",
+        "state": {
+          "airco": "Airco",
+          "cv": "CV",
+          "both": "Both",
+          "off": "Off"
+        }
+      },
+      "phase": {
+        "name": "Phase",
+        "state": {
+          "heat_up": "Heating up",
+          "maintain": "Maintaining",
+          "off": "Off"
+        }
+      },
+      "preheat_start": {
+        "name": "Preheat start"
+      },
+      "maintain_cost_airco": {
+        "name": "Maintain cost airco"
+      },
+      "maintain_cost_cv": {
+        "name": "Maintain cost boiler"
+      },
+      "learning": {
+        "name": "Learning data"
+      }
+    },
+    "number": {
+      "comfort_temp": {
+        "name": "Comfort temperature"
+      },
+      "eco_temp": {
+        "name": "Eco temperature"
+      }
+    },
+    "time": {
+      "comfort_start": {
+        "name": "Comfort from"
+      },
+      "comfort_end": {
+        "name": "Comfort until"
+      }
+    }
+  },
+  "services": {
+    "reset_learning": {
+      "name": "Reset learning data",
+      "description": "Clears all learned data."
+    }
+  }
+}

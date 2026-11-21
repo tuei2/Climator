@@ -1,0 +1,109 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Climator",
+        "data": {
+          "name": "Naam",
+          "room_sensor": "Ruimtetemperatuur (bron)",
+          "outdoor_sensor": "Buitentemperatuur",
+          "airco_climate": "Airco (climate)",
+          "cv_climate": "CV-thermostaat (climate)",
+          "airco_energy_sensor": "Energieverbruik airco (kWh, oplopend)",
+          "gas_sensor": "Gasmeter (m³, oplopend)",
+          "dhw_sensor": "Tapwater actief (optioneel)"
+        }
+      }
+    },
+    "error": {
+      "same_climate": "Airco en CV moeten verschillende entiteiten zijn"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Instellingen",
+        "data": {
+          "room_sensor": "Ruimtetemperatuur (bron)",
+          "outdoor_sensor": "Buitentemperatuur",
+          "airco_climate": "Airco (climate)",
+          "cv_climate": "CV-thermostaat (climate)",
+          "airco_energy_sensor": "Energieverbruik airco (kWh, oplopend)",
+          "gas_sensor": "Gasmeter (m³, oplopend)",
+          "dhw_sensor": "Tapwater actief (optioneel)",
+          "price_kwh": "Stroomprijs per kWh",
+          "price_gas": "Gasprijs per m³",
+          "airco_offset": "Airco setpoint-offset",
+          "cv_offset": "CV setpoint-offset",
+          "cv_setback": "CV-temperatuur als CV niet actief is",
+          "airco_min_outdoor": "Airco niet gebruiken onder buitentemp.",
+          "allow_both": "Beide tegelijk mogen gebruiken",
+          "max_heatup_minutes": "Max. opwarmtijd bij handmatige wijziging",
+          "max_preheat_minutes": "Max. voorverwarmtijd",
+          "preheat_margin_minutes": "Marge voorverwarmen",
+          "min_switch_minutes": "Min. tijd tussen wisselen bron",
+          "hysteresis": "Hysterese",
+          "override_minutes": "Pauze na handmatige bediening (0 = module overschrijft)"
+        }
+      }
+    },
+    "error": {
+      "same_climate": "Airco en CV moeten verschillende entiteiten zijn"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "strategy": {
+        "name": "Strategie",
+        "state": {
+          "airco": "Airco",
+          "cv": "CV",
+          "both": "Beide",
+          "off": "Uit"
+        }
+      },
+      "phase": {
+        "name": "Fase",
+        "state": {
+          "heat_up": "Opwarmen",
+          "maintain": "Op temperatuur houden",
+          "off": "Uit"
+        }
+      },
+      "preheat_start": {
+        "name": "Start voorverwarmen"
+      },
+      "maintain_cost_airco": {
+        "name": "Kosten op temp. houden airco"
+      },
+      "maintain_cost_cv": {
+        "name": "Kosten op temp. houden CV"
+      },
+      "learning": {
+        "name": "Leerdata"
+      }
+    },
+    "number": {
+      "comfort_temp": {
+        "name": "Comforttemperatuur"
+      },
+      "eco_temp": {
+        "name": "Ecotemperatuur"
+      }
+    },
+    "time": {
+      "comfort_start": {
+        "name": "Comfort vanaf"
+      },
+      "comfort_end": {
+        "name": "Comfort tot"
+      }
+    }
+  },
+  "services": {
+    "reset_learning": {
+      "name": "Leerdata wissen",
+      "description": "Wist alle geleerde gegevens."
+    }
+  }
+}
