@@ -8,7 +8,7 @@
   "dependencies": [],
   "documentation": "https://github.com/tuei2/Climator",
   "iot_class": "calculated",
+  "issue_tracker": "https://github.com/tuei2/Climator/issues",
   "requirements": [],
-  "version": "0.2.0",
-  "issue_tracker": "https://github.com/tuei2/Climator/issues"
+  "version": "0.2.0"
 }
