@@ -10,7 +10,8 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          ignore: brands
+          # brands/description/topics/license are only required for the HACS default store
+          ignore: brands description topics license
   hassfest:
     runs-on: ubuntu-latest
     steps:
