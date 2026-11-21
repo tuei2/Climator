@@ -168,6 +168,12 @@
           "away": "Away",
           "vacation": "Vacation"
         }
+      },
+      "expected_cost_week": {
+        "name": "Expected heating cost per week"
+      },
+      "next_action": {
+        "name": "Next action"
       }
     },
     "number": {
@@ -224,6 +230,9 @@
       },
       "feature_suggestions": {
         "name": "Function: suggestions"
+      },
+      "feature_fan": {
+        "name": "Function: fan speeds"
       }
     }
   },

@@ -49,16 +49,19 @@ class HeatOption:
     cost: float
 
 
+def full_cost_per_hour(model: ThermalModel, strategy: str, prices: Prices, boost: bool) -> float:
+    return sum(p * source_price(src, prices) for src, p in model.input_rate(strategy, boost).items())
+
+
 def heatup_options(model: ThermalModel, strategies, t_in, target, t_out, prices,
-                   solar=0.0) -> list[HeatOption]:
+                   solar=0.0, boost=False) -> list[HeatOption]:
     out = []
     for s in strategies:
-        dur = model.time_to(t_in, target, t_out, model.heat_rate(s, t_out), solar)
+        dur = model.time_to(t_in, target, t_out, model.heat_rate(s, t_out, boost), solar)
         if dur is None:
             out.append(HeatOption(s, INF, INF))
             continue
-        cost_h = sum(model.pmax[src] * source_price(src, prices) for src in _sources(s))
-        out.append(HeatOption(s, dur, dur * cost_h))
+        out.append(HeatOption(s, dur, dur * full_cost_per_hour(model, s, prices, boost)))
     return out
 
 
@@ -70,7 +73,9 @@ def maintain_costs(model: ThermalModel, strategies, target, t_out, prices,
         if s == STRAT_BOTH:
             continue
         need = model.maintain_input(s, target, t_out, solar)
-        out[s] = INF if need > model.pmax[s] * 1.05 else need * source_price(s, prices)
+        # keeping warm uses the soft fan; boost is the fallback when soft is too weak
+        cap = max(model.pmax[s], model.pmax["airco_boost"]) if s == STRAT_AIRCO else model.pmax[s]
+        out[s] = INF if need > cap * 1.05 else need * source_price(s, prices)
     return out
 
 
@@ -98,6 +103,7 @@ class Inputs:
     away_temp: float = 16.0
     vacation_temp: float = 14.0
     window_open: bool = False
+    fan_control: bool = False       # boost fan while heating up, soft fan while keeping warm
     buffer_deg: float = 0.0         # 0 = buffering off
     buffer_threshold: float = 0.15
     hysteresis: float = 0.3
@@ -126,6 +132,7 @@ class Decision:
     heat_options: list[HeatOption] = field(default_factory=list)
     maintain_costs: dict = field(default_factory=dict)
     next_comfort: tuple | None = None
+    fan: str | None = None          # "boost" | "comfort" | None (leave as is)
 
 
 class Planner:
@@ -158,7 +165,7 @@ class Planner:
                 mid = i.now + timedelta(hours=wait / 2)
                 t_begin = model.decay(i.t_in, wait, i.outdoor(mid), floor=min(i.eco_temp, i.t_in))
                 t_out = i.outdoor(begin)
-                dur = model.time_to(t_begin, temp, t_out, model.heat_rate(s, t_out))
+                dur = model.time_to(t_begin, temp, t_out, model.heat_rate(s, t_out, i.fan_control))
                 if dur is None:
                     break
                 if abs(dur - lead) < 0.02:
@@ -167,9 +174,12 @@ class Planner:
                 lead = dur
             if dur is None:
                 continue
-            cost_h = sum(model.pmax[src] * source_price(src, i.prices) for src in _sources(s))
-            opt = HeatOption(s, lead, lead * cost_h)
-            fits = lead + i.preheat_margin_h <= i.max_preheat_h
+            opt = HeatOption(s, lead, lead * full_cost_per_hour(model, s, i.prices, i.fan_control))
+            total = lead + i.preheat_margin_h
+            # cheapest option that can start within the allowed lead time (the preferred maximum,
+            # stretched up to 2x / 8 h when that is cheaper than boosting); otherwise the fastest
+            limit = max(min(2 * i.max_preheat_h, 8.0), i.max_preheat_h)
+            fits = total <= limit
             key = (not fits, opt.cost if fits else opt.duration_h)
             if best is None or key < best[0]:
                 best = (key, opt)
@@ -248,10 +258,12 @@ class Planner:
 
         opts: list[HeatOption] = []
         if heating:
-            opts = heatup_options(model, i.strategies, i.t_in, target, i.t_out, i.prices, i.solar)
+            opts = heatup_options(model, i.strategies, i.t_in, target, i.t_out, i.prices, i.solar,
+                                  i.fan_control)
             if deadline:
                 # the preheat margin is spare time: it may be used before switching to faster
-                max_h = max((deadline - now).total_seconds() / 3600, 0)
+                # small grace: a few minutes late is better than switching to a costly boost
+                max_h = max((deadline - now).total_seconds() / 3600 * 1.1 + 0.15, 0)
             else:
                 max_h = i.max_heatup_h
             choice = choose_heatup(opts, max_h)
@@ -279,48 +291,173 @@ class Planner:
             self.last_switch = now
         self.strategy, self.phase = new_strategy, new_phase
 
+        fan = None
+        if i.fan_control and self.strategy in (STRAT_AIRCO, STRAT_BOTH):
+            fan = "boost" if self.phase == PHASE_HEAT else "comfort"
+            # soft fan too weak to keep up (hard frost): blow harder
+            if (fan == "comfort" and self.strategy == STRAT_AIRCO
+                    and model.maintain_input(STRAT_AIRCO, target, i.t_out, i.solar) > model.pmax["airco"] * 0.95):
+                fan = "boost"
         return Decision(self.strategy, self.phase, target, reason, preheat_start, deadline,
-                        opts, maint, next_comfort)
+                        opts, maint, next_comfort, fan)
 
 
-def forecast(planner: Planner, base: Inputs, model: ThermalModel, hours: float = 24,
-             step_min: int = 10) -> dict:
-    """Simulate the coming hours: expected room temperature, target, source and cost."""
+def forecast(planner: Planner, base: Inputs, model: ThermalModel, hours: float = 72,
+             step_min: int = 15) -> dict:
+    """Simulate the coming hours/days.
+
+    Returns expected room temperature, target, source, fan and cost per step, plus cost per
+    hour and per day, a list of upcoming actions, a cost split and comfort shortfall.
+    Assumes someone is home and windows stay closed.
+    """
+    empty = {"points": [], "cost": None, "hourly": [], "daily": [], "actions": [],
+             "split": {}, "deficit_h": None, "hours": hours}
     if base.t_in is None or base.t_out is None or base.mode == "off":
-        return {"points": [], "cost": None}
+        return empty
     p = copy.deepcopy(planner)
     t = base.t_in
-    cost = 0.0
-    pts = []
     step_h = step_min / 60
     now = base.now
+    pts, actions = [], []
+    hourly: dict[int, dict] = {}
+    daily: dict[str, dict] = {}
+    split = {"heat_up": 0.0, "maintain": 0.0, "airco": 0.0, "cv": 0.0}
+    deficit = 0.0
+    total = 0.0
+    cur = None
     for n in range(int(hours * 60 / step_min) + 1):
         when = now + timedelta(minutes=n * step_min)
         t_out = base.outdoor(when)
         inp = copy.copy(base)
-        inp.now, inp.t_in, inp.t_out, inp.solar, inp.window_open = when, t, t_out, 0.0, False
+        inp.now, inp.t_in, inp.t_out, inp.solar = when, t, t_out, 0.0
+        inp.window_open, inp.presence = False, "vacation" if base.presence == "vacation" else "home"
         d = p.decide(inp, model)
-        pts.append([int(when.timestamp() * 1000), d.target, round(t, 2), d.strategy])
+        ts = int(when.timestamp() * 1000)
+        pts.append([ts, d.target, round(t, 2), d.strategy, d.fan])
+        comfort = comfort_at(base.schedule, when) if base.mode == "auto" else None
+        if comfort is not None and base.presence != "vacation" and t < comfort - 0.5:
+            deficit += step_h
+        key = (d.reason, d.strategy, d.phase, d.target, d.fan)
+        if cur is None or key != cur["key"]:
+            if cur is not None:
+                cur["end"], cur["t_end"] = ts, round(t, 2)
+                actions.append(cur)
+            cur = {"key": key, "t": ts, "reason": d.reason, "strategy": d.strategy, "phase": d.phase,
+                   "target": d.target, "fan": d.fan, "t_start": round(t, 2), "cost": 0.0,
+                   "deadline": int(d.deadline.timestamp() * 1000) if d.deadline else None}
+        if n == int(hours * 60 / step_min):
+            break
+        # physics + cost for this step
+        costs = {}
         if d.strategy == STRAT_OFF or d.target is None:
             t = model.decay(t, step_h, t_out)
-            continue
-        if d.phase == PHASE_HEAT or t < d.target - 0.05:
-            heat = model.heat_rate(d.strategy, t_out)
+        elif d.phase == PHASE_HEAT or t < d.target - 0.05:
+            boost = d.fan == "boost"
+            heat = model.heat_rate(d.strategy, t_out, boost)
             new_t = t + model.slope(t, t_out, heat) * step_h
+            frac = 1.0
             if new_t > d.target:
                 frac = (d.target - t) / max(new_t - t, 1e-6)
                 new_t = d.target
-            else:
-                frac = 1.0
-            cost += frac * step_h * sum(model.pmax[s] * source_price(s, base.prices)
-                                        for s in _sources(d.strategy))
+            for src, inp_rate in model.input_rate(d.strategy, boost).items():
+                costs[src] = frac * step_h * inp_rate * source_price(src, base.prices)
+            split["heat_up"] += sum(costs.values())
             t = new_t
         elif t > d.target + 0.05:
             t = max(model.decay(t, step_h, t_out), d.target)
         else:
             src = d.strategy if d.strategy != STRAT_BOTH else STRAT_AIRCO
-            cost += step_h * model.maintain_input(src, d.target, t_out) * source_price(src, base.prices)
+            costs[src] = step_h * model.maintain_input(src, d.target, t_out) * source_price(src, base.prices)
+            split["maintain"] += costs[src]
             t = d.target
         if math.isnan(t):
             break
-    return {"points": pts, "cost": round(cost, 3)}
+        step_cost = sum(costs.values())
+        total += step_cost
+        cur["cost"] += step_cost
+        hour = int(when.replace(minute=0, second=0, microsecond=0).timestamp() * 1000)
+        day = when.date().isoformat()
+        for src, c in costs.items():
+            split[src] += c
+            hourly.setdefault(hour, {"airco": 0.0, "cv": 0.0})[src] += c
+            daily.setdefault(day, {"airco": 0.0, "cv": 0.0})[src] += c
+    if cur is not None:
+        cur["end"], cur["t_end"] = pts[-1][0], round(t, 2)
+        actions.append(cur)
+    for a in actions:
+        a.pop("key", None)
+        a["cost"] = round(a["cost"], 3)
+    return {
+        "points": pts,
+        "cost": round(total, 3),
+        "hourly": [[h, round(v["airco"], 4), round(v["cv"], 4)] for h, v in sorted(hourly.items())],
+        "daily": [[d, round(v["airco"], 3), round(v["cv"], 3)] for d, v in sorted(daily.items())],
+        "actions": actions,
+        "split": {k: round(v, 3) for k, v in split.items()},
+        "deficit_h": round(deficit, 2),
+        "hours": hours,
+    }
+
+
+def _shift(hhmm: str, minutes: int) -> str:
+    h, m = map(int, hhmm.split(":"))
+    total = (h * 60 + m + minutes) % (24 * 60)
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def _schedule_variant(schedule: dict, temp_delta=0.0, start_delay=0) -> dict:
+    sch = copy.deepcopy(schedule)
+    for blocks in sch["profiles"].values():
+        for b in blocks:
+            b["temp"] = b["temp"] + temp_delta
+            if start_delay:
+                b["start"] = _shift(b["start"], start_delay)
+    return sch
+
+
+def what_if(planner: Planner, base: Inputs, model: ThermalModel, hours: float = 72) -> dict:
+    """Re-run the forecast with one change at a time to show where money can be saved."""
+    ref = forecast(Planner(), base, model, hours)
+    if ref["cost"] is None:
+        return {"base": None, "scenarios": []}
+    variants: list[tuple[str, Inputs]] = []
+
+    def var(name, **changes):
+        v = copy.copy(base)
+        for k, val in changes.items():
+            setattr(v, k, val)
+        variants.append((name, v))
+
+    if base.mode == "auto":
+        var("comfort_minus_05", schedule=_schedule_variant(base.schedule, -0.5))
+        var("comfort_minus_1", schedule=_schedule_variant(base.schedule, -1.0))
+        var("comfort_later_30", schedule=_schedule_variant(base.schedule, start_delay=30))
+        var("eco_minus_1", eco_temp=base.eco_temp - 1)
+        var("eco_plus_1", eco_temp=base.eco_temp + 1)
+    else:
+        var("manual_minus_05", manual_target=base.manual_target - 0.5)
+        var("manual_minus_1", manual_target=base.manual_target - 1.0)
+    if STRAT_AIRCO in base.strategies and len(base.strategies) > 1:
+        var("only_airco", strategies=[STRAT_AIRCO])
+    if STRAT_CV in base.strategies and len(base.strategies) > 1:
+        var("only_cv", strategies=[STRAT_CV])
+    if STRAT_BOTH in base.strategies:
+        var("no_both", strategies=[s for s in base.strategies if s != STRAT_BOTH])
+    if base.fan_control:
+        var("no_fan_control", fan_control=False)
+    out = []
+    week = 168 / hours
+    for name, v in variants:
+        r = forecast(Planner(), v, model, hours)
+        if r["cost"] is None:
+            continue
+        out.append({
+            "id": name,
+            "cost": r["cost"],
+            "delta_week": round((r["cost"] - ref["cost"]) * week, 2),
+            "deficit_h": r["deficit_h"],
+            "delta_deficit_h": round(((r["deficit_h"] or 0) - (ref["deficit_h"] or 0)) * week, 1),
+        })
+    out.sort(key=lambda x: x["delta_week"])
+    return {"base": {"cost": ref["cost"], "week": round(ref["cost"] * week, 2),
+                     "deficit_h": ref["deficit_h"]}, "scenarios": out, "hours": hours}

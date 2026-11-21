@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -27,7 +28,7 @@ from .const import (
 from .model import SampleCollector, ThermalModel
 from .planner import (
     PHASE_HEAT, PHASE_MAINTAIN, PHASE_OFF, STRAT_AIRCO, STRAT_BOTH, STRAT_CV, STRAT_OFF,
-    Decision, Inputs, Planner, Prices, forecast,
+    Decision, Inputs, Planner, Prices, forecast, what_if,
 )
 from .schedule import DEFAULT_SCHEDULE, comfort_at, validate
 
@@ -41,6 +42,11 @@ HOME_STATES = ("home", "on", "true")
 WINDOW_LEARN_BLOCK = timedelta(minutes=15)
 FORECAST_REFRESH = timedelta(minutes=30)
 NOTIFY_ID = "climator_{}"
+FORECAST_EVERY = timedelta(minutes=10)
+SCENARIOS_EVERY = timedelta(minutes=60)
+FORECAST_HOURS = 72
+BOOST_WORDS = ["powerful", "turbo", "max", "high", "5", "strong", "mediumhigh", "4"]
+SOFT_WORDS = ["quiet", "silence", "silent", "night", "low", "1", "lowmedium", "2"]
 
 
 def _as_list(v) -> list[str]:
@@ -98,6 +104,10 @@ class HybridHeatingController:
         self.last_sample_reason: str | None = None
         self._last_daily: str | None = None
         self._last_forecast_calc: datetime | None = None
+        self._last_scenarios: datetime | None = None
+        self._forecast_busy = False
+        self.forecast_hypothetical = False
+        self.scenarios: dict = {"base": None, "scenarios": []}
 
     # ---- lifecycle ----------------------------------------------------
     async def async_setup(self) -> None:
@@ -180,6 +190,7 @@ class HybridHeatingController:
 
     async def async_set_feature(self, feature: str, on: bool) -> None:
         self.features[feature] = bool(on)
+        self._last_scenarios = None
         if feature == "notifications" and not on:
             for nid in list(self._notified):
                 self._dismiss(nid)
@@ -214,9 +225,39 @@ class HybridHeatingController:
     def feature_active(self, feature: str) -> bool:
         if not self.features.get(feature, False):
             return False
+        if feature == "fan":
+            return len(self.fan_modes()) >= 2
         need = {"windows": CONF_WINDOWS, "presence": CONF_PRESENCE, "forecast": CONF_WEATHER,
                 "buffer": CONF_WEATHER, "solar": CONF_SOLAR}.get(feature)
         return not need or bool(_as_list(self.conf.get(need)))
+
+    # ---- fan ----------------------------------------------------------
+    def fan_modes(self) -> list[str]:
+        st = self.hass.states.get(self.conf.get(CONF_AIRCO) or "")
+        return list(st.attributes.get("fan_modes") or []) if st else []
+
+    def fan_mode_for(self, kind: str) -> str | None:
+        """The airco fan mode used for 'boost' (heating up) or 'comfort' (keeping warm)."""
+        modes = self.fan_modes()
+        if not modes:
+            return None
+        chosen = self.settings.get(f"fan_{kind}_mode")
+        if chosen in modes:
+            return chosen
+        real = [m for m in modes if str(m).lower() not in ("auto", "automatic")] or modes
+        words = BOOST_WORDS if kind == "boost" else SOFT_WORDS
+        for w in words:
+            for m in real:
+                if str(m).lower().replace(" ", "").replace("_", "") == w:
+                    return m
+        return real[-1] if kind == "boost" else real[0]
+
+    def _airco_boosting(self) -> bool:
+        st = self.hass.states.get(self.conf.get(CONF_AIRCO) or "")
+        if not st or st.state not in HEAT_MODES:
+            return False
+        boost = self.fan_mode_for("boost")
+        return boost is not None and st.attributes.get("fan_mode") == boost
 
     # ---- helpers ------------------------------------------------------
     def _float_entity(self, entity_id: str | None) -> float | None:
@@ -397,6 +438,7 @@ class HybridHeatingController:
             tout_at=self.tout_at if use_forecast else None,
             presence=self.presence, away_temp=float(s["away_temp"]),
             vacation_temp=float(s["vacation_temp"]), window_open=self.window_open,
+            fan_control=self.feature_active("fan"),
             buffer_deg=float(c[CONF_BUFFER_DEG]) if self.feature_active("buffer") and self._forecast else 0.0,
             buffer_threshold=float(c[CONF_BUFFER_THRESHOLD]) / 100,
             hysteresis=float(c[CONF_HYSTERESIS]),
@@ -431,13 +473,11 @@ class HybridHeatingController:
         if (d.strategy, d.phase, d.reason) != (prev.strategy, prev.phase, prev.reason):
             _LOGGER.info("Strategy %s / phase %s (%s)", d.strategy, d.phase, d.reason)
 
-        # forecast for the panel (every 10 minutes or after changes)
-        if controlling and (self._last_forecast_calc is None
-                            or now - self._last_forecast_calc >= timedelta(minutes=10)):
-            self.forecast_result = forecast(self.planner, inputs, self.model, hours=24)
+        # forecast + what-if scenarios (heavy: run in a worker thread)
+        if not self._forecast_busy and (
+                self._last_forecast_calc is None or now - self._last_forecast_calc >= FORECAST_EVERY):
             self._last_forecast_calc = now
-        elif not controlling:
-            self.forecast_result = {"points": [], "cost": None}
+            self.hass.async_create_task(self._async_forecast(inputs, controlling, now))
 
         # learning + costs
         dhw = False
@@ -447,11 +487,13 @@ class HybridHeatingController:
         kwh = self._float(CONF_AIRCO_ENERGY)
         m3 = self._float(CONF_GAS)
         excluded = "hot_water" if dhw else ("window" if self._window_blocks_learning(now) else None)
+        boosting = self._airco_boosting()
         sample, why = self.collector.tick(now.timestamp(), self.t_in, self.t_out, kwh, m3,
-                                          self.solar_kw or 0.0, excluded)
+                                          self.solar_kw or 0.0, excluded, boosting)
         if sample:
             heating_up = d.target is not None and d.target - sample.t_in0 > 0.5
-            self.model.observe_power("airco", sample.p_airco, heating_up and d.strategy in (STRAT_AIRCO, STRAT_BOTH))
+            self.model.observe_power(self.model.pmax_key("airco", sample.boost >= 0.5), sample.p_airco,
+                                     heating_up and d.strategy in (STRAT_AIRCO, STRAT_BOTH))
             self.model.observe_power("cv", sample.g_cv, heating_up and d.strategy in (STRAT_CV, STRAT_BOTH))
             self.model.add_sample(sample)
             self.last_sample_reason = "ok"
@@ -471,6 +513,38 @@ class HybridHeatingController:
         await self._daily(now)
         await self._check_health(now)
         self._notify()
+
+    async def _async_forecast(self, inputs: Inputs, controlling: bool, now: datetime) -> None:
+        self._forecast_busy = True
+        try:
+            base = copy.copy(inputs)
+            planner = copy.deepcopy(self.planner)
+            hypothetical = not controlling
+            if hypothetical:  # learn only / paused: show what the schedule would do
+                base.mode = "auto" if self.settings["mode"] == MODE_OFF else base.mode
+                base.window_open = False
+                planner = Planner()
+            if base.t_in is None or base.t_out is None:
+                return
+            self.forecast_result = await self.hass.async_add_executor_job(
+                forecast, planner, base, self.model, FORECAST_HOURS)
+            self.forecast_hypothetical = hypothetical
+            if self._last_scenarios is None or now - self._last_scenarios >= SCENARIOS_EVERY:
+                self._last_scenarios = now
+                self.scenarios = await self.hass.async_add_executor_job(
+                    what_if, planner, base, self.model, FORECAST_HOURS)
+            self._notify()
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Forecast failed")
+        finally:
+            self._forecast_busy = False
+
+    def expected_cost(self, hours: float) -> float | None:
+        hourly = self.forecast_result.get("hourly") or []
+        if not hourly:
+            return None
+        start = hourly[0][0]
+        return round(sum(a + c for h, a, c in hourly if h < start + hours * 3600 * 1000), 3)
 
     # ---- bookkeeping --------------------------------------------------
     def _log_event(self, kind: str, now: datetime) -> None:
@@ -720,6 +794,9 @@ class HybridHeatingController:
                 "cost_per_degree": round(price / g, 4),
                 "maintain_input": round(m.maintain_input(src, 20.0, t_out), 3),
             }
+        sources["airco"]["boost_gain"] = round(m.gain("airco", t_out, 1.0), 3)
+        sources["airco"]["boost_max_rate"] = round(m.heat_rate("airco", t_out, True), 2)
+        sources["airco"]["boost_cost_per_degree"] = round(p.kwh / m.gain("airco", t_out, 1.0), 4)
         chk = m.check()
         return {
             "version": VERSION,
@@ -740,6 +817,11 @@ class HybridHeatingController:
             "diagnostics": self.diagnostics(),
             "suggestions": [sg for sg in self.suggestions if sg.get("status") == "open"],
             "forecast": self.forecast_result,
+            "forecast_hypothetical": self.forecast_hypothetical,
+            "scenarios": self.scenarios,
+            "fan": {"modes": self.fan_modes(), "boost": self.fan_mode_for("boost"),
+                    "comfort": self.fan_mode_for("comfort"), "active": self.feature_active("fan"),
+                    "boosting": self._airco_boosting()},
             "outdoor_forecast": [[int(t * 1000), round(v + self.weather_bias, 1)]
                                  for t, v in self._forecast[:48]],
             "weather_bias": round(self.weather_bias, 2),
@@ -764,13 +846,15 @@ class HybridHeatingController:
     # ---- device control -----------------------------------------------
     def _detect_override(self) -> str | None:
         now = dt_util.utcnow()
-        for entity_id, ((mode, temp), since) in self._expected.items():
+        for entity_id, ((mode, temp, fan), since) in self._expected.items():
             if now - since < OVERRIDE_GRACE:
                 continue
             st = self.hass.states.get(entity_id)
             if st is None or st.state in BAD_STATES:
                 continue
             if mode and st.state != mode:
+                return entity_id
+            if fan is not None and mode != "off" and st.attributes.get("fan_mode") not in (None, fan):
                 return entity_id
             cur = st.attributes.get("temperature")
             if temp is not None and mode != "off" and cur is not None:
@@ -817,13 +901,15 @@ class HybridHeatingController:
         airco_on = d.strategy in (STRAT_AIRCO, STRAT_BOTH)
         cv_on = d.strategy in (STRAT_CV, STRAT_BOTH)
         if airco_on:
-            await self._set_climate(c[CONF_AIRCO], "heat", d.target + c[CONF_AIRCO_OFFSET])
+            fan = self.fan_mode_for(d.fan) if d.fan else None
+            await self._set_climate(c[CONF_AIRCO], "heat", d.target + c[CONF_AIRCO_OFFSET], fan)
         else:
             await self._set_climate(c[CONF_AIRCO], "off", None)
         cv_temp = d.target + c[CONF_CV_OFFSET] if cv_on else c[CONF_CV_SETBACK]
         await self._set_climate(c[CONF_CV], "heat", cv_temp)
 
-    async def _set_climate(self, entity_id: str, mode: str, temp: float | None) -> None:
+    async def _set_climate(self, entity_id: str, mode: str, temp: float | None,
+                           fan: str | None = None) -> None:
         st = self.hass.states.get(entity_id)
         if st is None or st.state in BAD_STATES:
             return
@@ -839,7 +925,9 @@ class HybridHeatingController:
             temp = round(round(temp / step) * step, 1)
             temp = max(attrs.get("min_temp", 5), min(attrs.get("max_temp", 30), temp))
 
-        cmd = (mode, temp)
+        if fan is not None and fan not in (attrs.get("fan_modes") or []):
+            fan = None
+        cmd = (mode, temp, fan)
         now = dt_util.utcnow()
         exp = self._expected.get(entity_id)
         if exp is None or exp[0] != cmd:
@@ -862,6 +950,11 @@ class HybridHeatingController:
                         "climate", "set_temperature",
                         {"entity_id": entity_id, "temperature": temp}, blocking=True)
                     sent = True
+            if fan is not None and mode != "off" and attrs.get("fan_mode") != fan:
+                await self.hass.services.async_call(
+                    "climate", "set_fan_mode", {"entity_id": entity_id, "fan_mode": fan},
+                    blocking=True)
+                sent = True
         except (HomeAssistantError, ValueError) as err:
             _LOGGER.warning("Controlling %s failed: %s", entity_id, err)
             return

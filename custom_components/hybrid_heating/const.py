@@ -85,12 +85,15 @@ DEFAULT_SETTINGS = {
     "vacation_temp": 14.0,
     "vacation": False,
     "guest": False,
+    "fan_boost_mode": None,     # None = pick automatically from the airco's fan modes
+    "fan_comfort_mode": None,
 }
 
 # Optional functions; each can be switched off (switch entity + panel).
-FEATURES = ["windows", "presence", "forecast", "buffer", "solar", "notifications", "suggestions"]
+FEATURES = ["fan", "windows", "presence", "forecast", "buffer", "solar", "notifications",
+            "suggestions"]
 DEFAULT_FEATURES = {f: f != "buffer" for f in FEATURES}
 
 UPDATE_INTERVAL_SECONDS = 60
 STORAGE_VERSION = 1
-VERSION = "0.5.0"
+VERSION = "0.6.0"

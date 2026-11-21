@@ -2,6 +2,7 @@
 
     dT/dt = -k * (T_in - T_out)                 heat loss to outside
             + (ga0 + ga1 * T_out) * P_airco     air conditioner, P in kW electric
+            + gab * P_airco * boost             extra heat per kW when the fan blows hard
             + gc * G_cv                          boiler, G in m3 gas per hour
             + gs * S                             sun, S = solar power in kW (optional)
 
@@ -16,16 +17,18 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-PARAMS = ["k", "ga0", "ga1", "gc", "gs"]
-PRIOR = {"k": 0.04, "ga0": 0.85, "ga1": 0.03, "gc": 2.0, "gs": 0.0}
+PARAMS = ["k", "ga0", "ga1", "gc", "gs", "gab"]
+N = len(PARAMS)
+PRIOR = {"k": 0.04, "ga0": 0.85, "ga1": 0.03, "gc": 2.0, "gs": 0.0, "gab": 0.0}
 # typical magnitude of each feature, used to scale the prior strength
-FEATURE_SCALE = {"k": 15.0, "ga0": 0.8, "ga1": 6.0, "gc": 0.8, "gs": 1.5}
+FEATURE_SCALE = {"k": 15.0, "ga0": 0.8, "ga1": 6.0, "gc": 0.8, "gs": 1.5, "gab": 1.0}
 PRIOR_SAMPLES = 5.0
 FORGET = 0.999          # per sample (15 min) -> half-life ~7 days
 SAMPLE_MINUTES = 15
 BOUNDS = {"k": (0.003, 0.5), "ga0": (0.0, 10.0), "ga1": (-0.2, 0.3),
-          "gc": (0.0, 15.0), "gs": (-0.5, 5.0)}
-DEFAULT_PMAX = {"airco": 1.0, "cv": 1.0}   # kW electric, m3/h gas
+          "gc": (0.0, 15.0), "gs": (-0.5, 5.0), "gab": (-1.0, 3.0)}
+# maximum input per source: airco (soft/auto fan) and airco_boost in kW electric, cv in m3/h
+DEFAULT_PMAX = {"airco": 0.8, "airco_boost": 1.2, "cv": 1.0}
 BUFFER_MAX = 7 * 24 * 60 // SAMPLE_MINUTES  # keep 7 days of samples
 
 
@@ -68,6 +71,7 @@ class Sample:
     g_cv: float       # mean gas use, m3/h
     solar: float      # mean solar power, kW
     hours: float
+    boost: float = 0.0  # fraction of the window the airco fan blew hard
 
     @property
     def slope(self) -> float:
@@ -79,12 +83,12 @@ class Sample:
 
     def features(self) -> list[float]:
         return [self.t_out - self.t_mid, self.p_airco, self.p_airco * self.t_out,
-                self.g_cv, self.solar]
+                self.g_cv, self.solar, self.p_airco * self.boost]
 
     def to_list(self) -> list:
         return [round(self.t), round(self.t_in0, 2), round(self.t_in1, 2), round(self.t_out, 2),
                 round(self.p_airco, 3), round(self.g_cv, 4), round(self.solar, 3),
-                round(self.hours, 4)]
+                round(self.hours, 4), round(self.boost, 2)]
 
     @classmethod
     def from_list(cls, v: list) -> "Sample":
@@ -93,11 +97,11 @@ class Sample:
 
 @dataclass
 class ThermalModel:
-    ata: list = field(default_factory=lambda: [[0.0] * 5 for _ in range(5)])
-    atb: list = field(default_factory=lambda: [0.0] * 5)
+    ata: list = field(default_factory=lambda: [[0.0] * N for _ in range(N)])
+    atb: list = field(default_factory=lambda: [0.0] * N)
     n_eff: float = 0.0
     counts: dict = field(default_factory=lambda: {
-        "passive": 0.0, "airco": 0.0, "cv": 0.0, "solar": 0.0})
+        "passive": 0.0, "airco": 0.0, "cv": 0.0, "solar": 0.0, "boost": 0.0})
     res2: float = 0.04          # EMA of squared residual (degC/h)^2
     pmax: dict = field(default_factory=lambda: dict(DEFAULT_PMAX))
     samples: list = field(default_factory=list)   # recent Sample objects
@@ -121,10 +125,17 @@ class ThermalModel:
         m = cls()
         if d and "ata" in d:
             m.ata, m.atb = d["ata"], d["atb"]
+            n_old = len(m.atb)
+            if n_old < N:  # model grew (new parameter): pad with zeros
+                m.ata = [row + [0.0] * (N - n_old) for row in m.ata] + [[0.0] * N for _ in range(N - n_old)]
+                m.atb = m.atb + [0.0] * (N - n_old)
             m.n_eff = d.get("n_eff", 0.0)
             m.counts.update(d.get("counts", {}))
             m.res2 = d.get("res2", 0.04)
-            m.pmax.update(d.get("pmax", {}))
+            old_pmax = d.get("pmax", {})
+            m.pmax.update(old_pmax)
+            if "airco_boost" not in old_pmax and "airco" in old_pmax:
+                m.pmax["airco_boost"] = max(old_pmax["airco"], DEFAULT_PMAX["airco_boost"])
             m.excluded = d.get("excluded", {})
             m.samples = [Sample.from_list(v) for v in d.get("samples", [])]
         m.solve()
@@ -136,8 +147,8 @@ class ThermalModel:
 
     # ---- learning -------------------------------------------------------
     def _prior(self):
-        a = [[0.0] * 5 for _ in range(5)]
-        b = [0.0] * 5
+        a = [[0.0] * N for _ in range(N)]
+        b = [0.0] * N
         for i, p in enumerate(PARAMS):
             w = PRIOR_SAMPLES * FEATURE_SCALE[p] ** 2
             a[i][i] = w
@@ -146,8 +157,8 @@ class ThermalModel:
 
     def solve(self) -> None:
         pa, pb = self._prior()
-        a = [[pa[i][j] + self.ata[i][j] for j in range(5)] for i in range(5)]
-        b = [pb[i] + self.atb[i] for i in range(5)]
+        a = [[pa[i][j] + self.ata[i][j] for j in range(N)] for i in range(N)]
+        b = [pb[i] + self.atb[i] for i in range(N)]
         sol = _solve(a, b) or [PRIOR[p] for p in PARAMS]
         self.clamped = []
         theta = {}
@@ -171,9 +182,9 @@ class ThermalModel:
         if not learn:
             return residual
         x = s.features()
-        for i in range(5):
+        for i in range(N):
             self.atb[i] = FORGET * self.atb[i] + x[i] * s.slope
-            for j in range(5):
+            for j in range(N):
                 self.ata[i][j] = FORGET * self.ata[i][j] + x[i] * x[j]
         self.n_eff = FORGET * self.n_eff + 1
         for k in self.counts:
@@ -186,6 +197,8 @@ class ThermalModel:
             self.counts["cv"] += 1
         if s.solar >= 0.1:
             self.counts["solar"] += 1
+        if s.p_airco >= 0.05 and s.boost >= 0.5:
+            self.counts["boost"] += 1
         self.res2 = 0.98 * self.res2 + 0.02 * residual ** 2
         self.solve()
         return residual
@@ -216,20 +229,35 @@ class ThermalModel:
             "ga1": level(self.counts["airco"] / 2),
             "gc": level(self.counts["cv"]),
             "gs": level(self.counts["solar"]),
+            "gab": level(self.counts.get("boost", 0.0)),
         }
 
     # ---- physics helpers ------------------------------------------------
-    def gain(self, source: str, t_out: float) -> float:
+    def gain(self, source: str, t_out: float, boost: float = 0.0) -> float:
         """degC per hour per unit of input (kW for airco, m3/h for cv)."""
         th = self.theta
         if source == "airco":
-            return max(th["ga0"] + th["ga1"] * t_out, 0.05)
+            return max(th["ga0"] + th["ga1"] * t_out + th["gab"] * boost, 0.05)
         return max(th["gc"], 0.05)
 
-    def heat_rate(self, strategy: str, t_out: float) -> float:
+    def pmax_key(self, source: str, boost: bool) -> str:
+        return "airco_boost" if source == "airco" and boost else source
+
+    def pmax_of(self, source: str, boost: bool) -> float:
+        """Learned maximum input; blowing hard never delivers less than blowing softly."""
+        if source == "airco" and boost:
+            return max(self.pmax["airco_boost"], self.pmax["airco"])
+        return self.pmax[source]
+
+    def heat_rate(self, strategy: str, t_out: float, boost: bool = False) -> float:
         """degC/h added at full power by a strategy (before losses)."""
         srcs = ["airco", "cv"] if strategy == "both" else [strategy]
-        return sum(self.gain(s, t_out) * self.pmax[s] for s in srcs)
+        return sum(self.gain(s, t_out, 1.0 if boost else 0.0) * self.pmax_of(s, boost) for s in srcs)
+
+    def input_rate(self, strategy: str, boost: bool = False) -> dict:
+        """Full-power input per source: {'airco': kW, 'cv': m3/h}."""
+        srcs = ["airco", "cv"] if strategy == "both" else [strategy]
+        return {s: self.pmax_of(s, boost) for s in srcs}
 
     def slope(self, t_in, t_out, heat=0.0, solar=0.0) -> float:
         return -self.theta["k"] * (t_in - t_out) + heat + self.theta["gs"] * solar
@@ -251,10 +279,10 @@ class ThermalModel:
         t = t_eq + (t0 - t_eq) * math.exp(-k * hours)
         return max(t, floor) if floor is not None else t
 
-    def maintain_input(self, source: str, target, t_out, solar=0.0) -> float:
+    def maintain_input(self, source: str, target, t_out, solar=0.0, boost: bool = False) -> float:
         """Power (kW or m3/h) needed to keep the room at target."""
         need = self.theta["k"] * (target - t_out) - self.theta["gs"] * solar
-        return max(need, 0.0) / self.gain(source, t_out)
+        return max(need, 0.0) / self.gain(source, t_out, 1.0 if boost else 0.0)
 
     # ---- validation -----------------------------------------------------
     def check(self, horizon_steps: int = 4, max_age_h: float = 72) -> dict:
@@ -271,7 +299,7 @@ class ThermalModel:
                 continue  # gap in data
             t = seg[0].t_in0
             for s in seg:
-                t += self.slope(t, s.t_out, self.gain("airco", s.t_out) * s.p_airco
+                t += self.slope(t, s.t_out, self.gain("airco", s.t_out, s.boost) * s.p_airco
                                 + self.gain("cv", s.t_out) * s.g_cv, s.solar) * s.hours
             errs.append(t - seg[-1].t_in1)
         if not errs:
@@ -290,7 +318,7 @@ class ThermalModel:
             gap = i and abs(s.t - recent[i - 1].t - s.hours * 3600) > 120
             if t is None or i % reset_every == 0 or gap:
                 t = s.t_in0
-            t += self.slope(t, s.t_out, self.gain("airco", s.t_out) * s.p_airco
+            t += self.slope(t, s.t_out, self.gain("airco", s.t_out, s.boost) * s.p_airco
                             + self.gain("cv", s.t_out) * s.g_cv, s.solar) * s.hours
             out.append([round(s.t * 1000), round(s.t_in1, 2), round(t, 2)])
         return out
@@ -305,24 +333,25 @@ class SampleCollector:
     def reset(self) -> None:
         self.start = None
 
-    def tick(self, now_ts, t_in, t_out, kwh, m3, solar_kw, excluded_reason):
+    def tick(self, now_ts, t_in, t_out, kwh, m3, solar_kw, excluded_reason, boost=False):
         """Returns (Sample | None, reason | None) at the end of a window."""
         if None in (t_in, t_out):
             self.start = None
             return None, None
         if self.start is None:
-            self.start = {"t": now_ts, "t_in": t_in, "kwh": kwh, "m3": m3,
+            self.start = {"t": now_ts, "t_in": t_in, "kwh": kwh, "m3": m3, "boost": [1.0 if boost else 0.0],
                           "outs": [t_out], "sol": [solar_kw or 0.0], "excl": excluded_reason}
             return None, None
         w = self.start
         w["outs"].append(t_out)
         w["sol"].append(solar_kw or 0.0)
+        w["boost"].append(1.0 if boost else 0.0)
         if excluded_reason and not w["excl"]:
             w["excl"] = excluded_reason
         elapsed = now_ts - w["t"]
         if elapsed < SAMPLE_MINUTES * 60 - 5:
             return None, None
-        self.start = {"t": now_ts, "t_in": t_in, "kwh": kwh, "m3": m3,
+        self.start = {"t": now_ts, "t_in": t_in, "kwh": kwh, "m3": m3, "boost": [1.0 if boost else 0.0],
                       "outs": [t_out], "sol": [solar_kw or 0.0], "excl": excluded_reason}
         hours = elapsed / 3600
         if elapsed > SAMPLE_MINUTES * 60 * 1.6:
@@ -337,5 +366,6 @@ class SampleCollector:
         if abs(t_in - w["t_in"]) / hours > 6:
             return None, "temp_jump"
         s = Sample(now_ts, w["t_in"], t_in, sum(w["outs"]) / len(w["outs"]),
-                   d_kwh / hours, d_m3 / hours, sum(w["sol"]) / len(w["sol"]), hours)
+                   d_kwh / hours, d_m3 / hours, sum(w["sol"]) / len(w["sol"]), hours,
+                   sum(w["boost"]) / len(w["boost"]))
         return s, None

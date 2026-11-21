@@ -20,11 +20,11 @@ const COLORS = {
 };
 const STRATS = ["airco", "cv", "both"];
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const FEATURES = ["windows", "presence", "forecast", "buffer", "solar", "notifications", "suggestions"];
+const FEATURES = ["fan", "windows", "presence", "forecast", "buffer", "solar", "notifications", "suggestions"];
 
 const I18N = {
   en: {
-    tabs: { status: "Status", costs: "Costs", model: "Model", settings: "Settings" },
+    tabs: { status: "Status", forecast: "Forecast", costs: "Costs", model: "Model", settings: "Settings" },
     modes: { learn_only: "Learn only", manual: "Fixed temperature", schedule: "Schedule + preheat" },
     strategy: { airco: "Air conditioner", cv: "Boiler", both: "Both", off: "Off" },
     phase: { heat_up: "Heating up", maintain: "Keeping warm", off: "Off", paused: "Paused" },
@@ -114,8 +114,48 @@ const I18N = {
       unconfigured: () => "Switched on, but no entity configured (see advanced settings)",
     },
     status: { ok: "OK", info: "Info", warn: "Check", error: "Error" },
+    fc: {
+      hypothetical: "Climator is in Learn only: this is what the schedule would do.",
+      restToday: "Rest of today", tomorrow: "Tomorrow", next3: "Next 3 days", perWeek: "Per week (estimate)",
+      shortfall: "Too cold (comfort)", shortfallSub: (h) => `${h} h below comfort in 3 days`,
+      planTitle: "Plan for the next 3 days", costHourTitle: "Expected cost per hour", costDayTitle: "Expected cost per day",
+      actionsTitle: "Upcoming actions", splitTitle: "Where does the money go?",
+      heatUp: "Heating up", keepWarm: "Keeping warm",
+      savingsTitle: "Where can you save?",
+      savingsText: (w) => `Each line re-runs the 3-day forecast with one change. Current settings: about ${w} per week.`,
+      perWeekShort: "per week", comfortEffect: "Comfort", noEffect: "no difference",
+      colder: (h) => `${h} h/week too cold`, warmer: (h) => `${h} h/week less too cold`,
+      scen: {
+        comfort_minus_05: ["Comfort temperature 0.5 °C lower", "All schedule blocks half a degree cooler."],
+        comfort_minus_1: ["Comfort temperature 1 °C lower", "All schedule blocks one degree cooler."],
+        comfort_later_30: ["Comfort blocks start 30 min later", "Shorter comfort time, less preheating."],
+        eco_minus_1: ["Eco temperature 1 °C lower", "Cooler at night / outside the schedule."],
+        eco_plus_1: ["Eco temperature 1 °C higher", "Warmer at night: less heating up, more keeping warm."],
+        manual_minus_05: ["Temperature 0.5 °C lower", "Fixed temperature half a degree cooler."],
+        manual_minus_1: ["Temperature 1 °C lower", "Fixed temperature one degree cooler."],
+        only_airco: ["Only the air conditioner", "Never use the boiler."],
+        only_cv: ["Only the boiler", "Never use the air conditioner."],
+        no_both: ["Never both at once", "No combined boost of air conditioner and boiler."],
+        no_fan_control: ["Don't control the fan", "No hard blowing while heating up."],
+      },
+      act: {
+        heat_up: (tg, s) => `Heat up to ${tg} °C with ${s}`,
+        maintain: (tg, s) => `Keep at ${tg} °C with ${s}`,
+        off: (te) => `Heating off — room cools to about ${te} °C`,
+        coolThen: (tg, s) => `Let it cool to ${tg} °C, then keep it there with ${s}`,
+        preheatFor: (t) => `for ${t}`, until: "until", now: "Now",
+      },
+      noForecast: "No forecast yet (needs room and outdoor temperature).",
+    },
+    fan: { boost: "blowing hard", comfort: "blowing softly" },
+    fanTitle: "Air conditioner fan", fanText: "While heating up the fan blows hard; while keeping warm it blows softly (quiet).",
+    fanBoost: "Fan while heating up", fanComfort: "Fan while keeping warm", fanAuto: "automatic choice",
+    fanNone: "The air conditioner reports no fan modes.",
+    fanCard: "Fan", fanGain: (p) => `Blowing hard gives ${p} heat per kWh than softly.`,
+    fanRates: (b, c, u) => `Max heat-up: hard ${b} °C/${u} · soft ${c} °C/${u}`,
     mode: "Mode", functions: "Functions", functionsText: "Optional functions. Switch off what you don't want; Climator then simply ignores it.",
     feat: {
+      fan: ["Fan speeds", "Blow hard while heating up, softly while keeping warm."],
       windows: ["Window detection", "Pause heating while a window or door is open."],
       presence: ["Presence", "Use the away temperature when nobody is home."],
       forecast: ["Weather forecast", "Use the hourly forecast for preheating and the 24-hour plan."],
@@ -135,7 +175,7 @@ const I18N = {
     advanced: "Advanced settings (entities, offsets, delays)", open: "Open",
   },
   nl: {
-    tabs: { status: "Status", costs: "Kosten", model: "Model", settings: "Instellingen" },
+    tabs: { status: "Status", forecast: "Vooruitblik", costs: "Kosten", model: "Model", settings: "Instellingen" },
     modes: { learn_only: "Alleen leren", manual: "Vaste temperatuur", schedule: "Schema + voorverwarmen" },
     strategy: { airco: "Airco", cv: "CV", both: "Beide", off: "Uit" },
     phase: { heat_up: "Opwarmen", maintain: "Op temperatuur houden", off: "Uit", paused: "Gepauzeerd" },
@@ -225,8 +265,48 @@ const I18N = {
       unconfigured: () => "Aangezet, maar geen entiteit ingesteld (zie geavanceerde instellingen)",
     },
     status: { ok: "OK", info: "Info", warn: "Controleer", error: "Fout" },
+    fc: {
+      hypothetical: "Climator staat op Alleen leren: dit is wat het schema zou doen.",
+      restToday: "Rest van vandaag", tomorrow: "Morgen", next3: "Komende 3 dagen", perWeek: "Per week (schatting)",
+      shortfall: "Te koud (comfort)", shortfallSub: (h) => `${h} u onder comfort in 3 dagen`,
+      planTitle: "Planning komende 3 dagen", costHourTitle: "Verwachte kosten per uur", costDayTitle: "Verwachte kosten per dag",
+      actionsTitle: "Komende acties", splitTitle: "Waar gaat het geld naartoe?",
+      heatUp: "Opwarmen", keepWarm: "Warm houden",
+      savingsTitle: "Waar kun je besparen?",
+      savingsText: (w) => `Elke regel rekent de 3-daagse verwachting opnieuw door met één wijziging. Huidige instellingen: ongeveer ${w} per week.`,
+      perWeekShort: "per week", comfortEffect: "Comfort", noEffect: "geen verschil",
+      colder: (h) => `${h} u/week te koud`, warmer: (h) => `${h} u/week minder te koud`,
+      scen: {
+        comfort_minus_05: ["Comforttemperatuur 0,5 °C lager", "Alle schemablokken een halve graad koeler."],
+        comfort_minus_1: ["Comforttemperatuur 1 °C lager", "Alle schemablokken een graad koeler."],
+        comfort_later_30: ["Comfortblokken 30 min later starten", "Kortere comforttijd, minder voorverwarmen."],
+        eco_minus_1: ["Eco-temperatuur 1 °C lager", "Koeler 's nachts / buiten het schema."],
+        eco_plus_1: ["Eco-temperatuur 1 °C hoger", "Warmer 's nachts: minder opwarmen, meer warm houden."],
+        manual_minus_05: ["Temperatuur 0,5 °C lager", "Vaste temperatuur een halve graad koeler."],
+        manual_minus_1: ["Temperatuur 1 °C lager", "Vaste temperatuur een graad koeler."],
+        only_airco: ["Alleen de airco", "De CV nooit gebruiken."],
+        only_cv: ["Alleen de CV", "De airco nooit gebruiken."],
+        no_both: ["Nooit beide tegelijk", "Geen gecombineerde boost van airco en CV."],
+        no_fan_control: ["Ventilator niet aansturen", "Niet hard blazen bij het opwarmen."],
+      },
+      act: {
+        heat_up: (tg, s) => `Opwarmen naar ${tg} °C met ${s}`,
+        maintain: (tg, s) => `Op ${tg} °C houden met ${s}`,
+        off: (te) => `Verwarming uit — kamer koelt af naar ongeveer ${te} °C`,
+        coolThen: (tg, s) => `Laten afkoelen naar ${tg} °C, daarna vasthouden met ${s}`,
+        preheatFor: (t) => `voor ${t}`, until: "tot", now: "Nu",
+      },
+      noForecast: "Nog geen verwachting (heeft kamer- en buitentemperatuur nodig).",
+    },
+    fan: { boost: "hard blazen", comfort: "zacht blazen" },
+    fanTitle: "Ventilator airco", fanText: "Bij opwarmen blaast de airco hard; bij warm houden zacht (stil).",
+    fanBoost: "Ventilator bij opwarmen", fanComfort: "Ventilator bij warm houden", fanAuto: "automatisch kiezen",
+    fanNone: "De airco meldt geen ventilatorstanden.",
+    fanCard: "Ventilator", fanGain: (p) => `Hard blazen geeft ${p} warmte per kWh dan zacht.`,
+    fanRates: (b, c, u) => `Max opwarmen: hard ${b} °C/${u} · zacht ${c} °C/${u}`,
     mode: "Modus", functions: "Functies", functionsText: "Optionele functies. Zet uit wat je niet wilt; Climator negeert het dan gewoon.",
     feat: {
+      fan: ["Ventilatorstanden", "Hard blazen bij opwarmen, zacht blazen bij warm houden."],
       windows: ["Raamdetectie", "Verwarming pauzeren als een raam of deur open staat."],
       presence: ["Aanwezigheid", "Afwezig-temperatuur gebruiken als niemand thuis is."],
       forecast: ["Weersverwachting", "De uurverwachting gebruiken voor voorverwarmen en de 24-uursplanning."],
@@ -404,6 +484,7 @@ class ClimatorPanel extends HTMLElement {
     this._ro = new ResizeObserver(() => {
       if (this._tab === "status") this._drawChart();
       if (this._tab === "model") this._drawModelCharts();
+      if (this._tab === "forecast") this._drawForecastCharts();
     });
   }
 
@@ -423,13 +504,14 @@ class ClimatorPanel extends HTMLElement {
     // never wipe a form the user is editing
     if (!force && this._tab === "settings") return;
     if (!ok) { content.innerHTML = `<div class="banner err">${t.unavailable}</div>`; return; }
-    const fn = { status: this._status, costs: this._costs, model: this._model, settings: this._settings }[this._tab];
+    const fn = { status: this._status, forecast: this._forecast, costs: this._costs, model: this._model, settings: this._settings }[this._tab];
     const scroll = window.scrollY;
     content.innerHTML = (this._toast ? `<div class="banner err">${esc(this._toast)}</div>` : "") + fn.call(this);
     this._ro.disconnect();
     content.querySelectorAll(".chart").forEach((el) => this._ro.observe(el));
     if (this._tab === "status") this._drawChart();
     if (this._tab === "model") this._drawModelCharts();
+    if (this._tab === "forecast") this._drawForecastCharts();
     window.scrollTo(0, scroll);
   }
 
@@ -494,7 +576,7 @@ class ClimatorPanel extends HTMLElement {
         ${this._card(t.strategyNow, this._chip(strategy), `${t.phase[phase] || phase} · ${t.reason[reason] || reason}`)}
         ${this._card(preDate ? t.preheatStart : t.nextComfort, preDate ? this._when(preDate) : (next ? this._when(next.start) : "–"), next ? `${t.nextComfort} ${this._when(next.start)} · ${this._fmt(next.temp)} °C` : "")}
         ${this._card(t.costToday, this._eur(this._num(E.costToday("total"))), `${t.strategy.airco} ${this._eur(this._num(E.costToday("airco")))} · ${t.strategy.cv} ${this._eur(this._num(E.costToday("cv")))}`)}
-        ${this._card(t.expected24, this._eur(info.forecast?.cost), "")}
+        ${this._card(t.expected24, this._eur(this._fcCost(24)), "")}
         ${this._card(t.keepWarm, finite.length ? `${this._eur(Math.min(...finite), 3)}${t.perHour}` : "–", `${t.strategy.airco} ${this._eur(keepA, 3)} · ${t.strategy.cv} ${this._eur(keepC, 3)}`)}
         ${this._card(t.comfortScore, comfort.today != null ? `${this._fmt(comfort.today, 0)}%` : "–", `${t.week}: ${comfort.week != null ? this._fmt(comfort.week, 0) + "%" : "–"}`)}
         ${this._card(t.presenceLbl, esc(t.presence[info.presence] || "–"), "")}
@@ -508,7 +590,7 @@ class ClimatorPanel extends HTMLElement {
             <span class="muted">${t.past}</span>
             ${[6, 12, 24, 72, 168].map((h) => `<button class="pill ${h === this._past ? "on" : ""}" data-action="past" data-value="${h}">${h < 48 ? h + this._hUnit : h / 24 + "d"}</button>`).join("")}
             <span class="muted">${t.ahead}</span>
-            ${[0, 12, 24].map((h) => `<button class="pill ${h === this._ahead ? "on" : ""}" data-action="ahead" data-value="${h}">${h ? h + this._hUnit : "–"}</button>`).join("")}
+            ${[0, 12, 24, 48, 72].map((h) => `<button class="pill ${h === this._ahead ? "on" : ""}" data-action="ahead" data-value="${h}">${h ? h + this._hUnit : "–"}</button>`).join("")}
           </div>
         </div>
         <div class="legend">${this._legend()}</div>
@@ -674,7 +756,7 @@ class ClimatorPanel extends HTMLElement {
     const live = (arr, v) => { if (v !== null && v !== undefined && Number.isFinite(+v)) arr.push([now, +v]); return arr; };
     live(s.room, this._num(src.room)); live(s.outdoor, this._num(src.outdoor)); live(s.target, a.temperature);
     s.strategy.push([now, this._st(E.strategy)?.state]);
-    const fc = this._ahead ? (this._info?.forecast?.points || []) : [];
+    const fc = this._ahead ? (this._info?.forecast?.points || []).filter((p) => p[0] <= x1) : [];
     const fcTarget = fc.map((p) => [p[0], p[1]]);
     const fcRoom = fc.map((p) => [p[0], p[2]]);
     const outFc = this._ahead ? (this._info?.outdoor_forecast || []).filter(([x]) => x >= now) : [];
@@ -719,6 +801,164 @@ class ClimatorPanel extends HTMLElement {
     });
   }
 
+
+  _fcCost(hours, fromTs = null, toTs = null) {
+    const hourly = this._info?.forecast?.hourly || [];
+    if (!hourly.length) return null;
+    const start = fromTs ?? hourly[0][0];
+    const end = toTs ?? start + hours * 3600e3;
+    return hourly.filter(([h]) => h >= start && h < end).reduce((s, [, a, c]) => s + a + c, 0);
+  }
+
+  _stratText(strategy, fan) {
+    const t = this.t;
+    const name = t.strategy[strategy] || strategy;
+    return fan ? `${name} (${t.fan[fan]})` : name;
+  }
+
+  _actionText(a) {
+    const t = this.t, A = t.fc.act;
+    if (a.strategy === "off" || a.target == null) {
+      return a.phase === "paused" ? t.reason.window_open : A.off(this._fmt(a.t_end, 1));
+    }
+    let txt = (a.phase === "heat_up" ? A.heat_up : A.maintain)(this._fmt(a.target, 1), this._stratText(a.strategy, a.fan));
+    if (a.phase !== "heat_up" && a.t_start != null && a.t_start > a.target + 0.3) txt = A.coolThen(this._fmt(a.target, 1), this._stratText(a.strategy, a.fan));
+    if (a.reason === "preheat" && a.deadline) txt += ` ${A.preheatFor(this._time(new Date(a.deadline)))}`;
+    return txt;
+  }
+
+  _forecast() {
+    const t = this.t, F = t.fc;
+    const info = this._info;
+    if (!info) return `<div class="muted pad">${esc(this._infoError || "…")}</div>`;
+    const fc = info.forecast || {};
+    if (!fc.points || !fc.points.length) return `<div class="banner">${F.noForecast}</div>`;
+    const now = Date.now();
+    const midnight = new Date(); midnight.setHours(24, 0, 0, 0);
+    const m2 = new Date(midnight); m2.setDate(m2.getDate() + 1);
+    const daySplit = (from, to) => {
+      const rows = (fc.hourly || []).filter(([h]) => h >= from && h < to);
+      return { a: rows.reduce((s, r) => s + r[1], 0), c: rows.reduce((s, r) => s + r[2], 0) };
+    };
+    const today = daySplit(0, midnight.getTime());
+    const tomorrow = daySplit(midnight.getTime(), m2.getTime());
+    const split = fc.split || {};
+    const totalSplit = (split.heat_up || 0) + (split.maintain || 0);
+    const pct = (v) => (totalSplit > 0 ? Math.round((100 * v) / totalSplit) : 0);
+    const week = fc.cost != null ? (fc.cost * 168) / (fc.hours || 72) : null;
+    const sub = (x) => `${t.strategy.airco} ${this._eur(x.a)} · ${t.strategy.cv} ${this._eur(x.c)}`;
+
+    const acts = (fc.actions || []).slice(0, 16).map((a, i) => {
+      const start = new Date(a.t), end = new Date(a.end);
+      const mins = Math.round((a.end - a.t) / 60000);
+      const dur = mins >= 60 ? `${Math.floor(mins / 60)}${this._hUnit} ${String(mins % 60).padStart(2, "0")}m` : `${mins}m`;
+      const cls = a.strategy === "off" ? "off" : a.strategy;
+      return `<div class="act ${a.phase}">
+        <div class="when">${i === 0 ? F.act.now : this._when(start)}</div>
+        <div class="dotline"><span class="adot ${cls}"></span></div>
+        <div class="what"><b>${esc(this._actionText(a))}</b>
+          <div class="sub">${esc(t.reason[a.reason] || a.reason)} · ${F.act.until} ${this._when(end)} (${dur})${a.t_end != null ? ` · ${this._fmt(a.t_start, 1)} → ${this._fmt(a.t_end, 1)} °C` : ""}</div></div>
+        <div class="acost">${a.cost > 0.005 ? this._eur(a.cost) : "–"}</div></div>`;
+    }).join("");
+
+    const sc = info.scenarios || {};
+    const scen = (sc.scenarios || []).map((x) => {
+      const lbl = F.scen[x.id] || [x.id, ""];
+      const good = x.delta_week < -0.005, bad = x.delta_week > 0.005;
+      const cmf = Math.abs(x.delta_deficit_h) < 0.25 ? F.noEffect : x.delta_deficit_h > 0 ? F.colder(this._fmt(x.delta_deficit_h, 1)) : F.warmer(this._fmt(-x.delta_deficit_h, 1));
+      return `<tr><td><b>${esc(lbl[0])}</b><div class="sub">${esc(lbl[1])}</div></td>
+        <td class="num ${good ? "save" : bad ? "more" : ""}">${x.delta_week > 0 ? "+" : ""}${this._eur(x.delta_week)}<div class="sub">${F.perWeekShort}</div></td>
+        <td class="${x.delta_deficit_h > 0.25 ? "more" : ""}">${esc(cmf)}</td></tr>`;
+    }).join("");
+
+    return `${info.forecast_hypothetical ? `<div class="banner warn"><div>${F.hypothetical}</div></div>` : ""}
+      <div class="grid">
+        ${this._card(F.restToday, this._eur(today.a + today.c), sub(today))}
+        ${this._card(F.tomorrow, this._eur(tomorrow.a + tomorrow.c), sub(tomorrow))}
+        ${this._card(F.next3, this._eur(fc.cost))}
+        ${this._card(F.perWeek, this._eur(week))}
+        ${this._card(F.shortfall, `${this._fmt(fc.deficit_h, 1)} ${this._hUnit}`, F.shortfallSub(this._fmt(fc.deficit_h, 1)))}
+      </div>
+      <div class="card"><h2>${F.planTitle}</h2>
+        <div class="legend"><span class="band-key"><i class="line dash" style="--c:${COLORS.room}"></i>${t.expectedRoom}</span>
+          <span class="band-key"><i class="line" style="--c:${COLORS.target}"></i>${t.plan}</span>
+          <span class="band-key"><i class="line dash" style="--c:${COLORS.outdoor}"></i>${t.outdoorFc}</span><span class="sep"></span>
+          ${STRATS.map((s) => `<span class="band-key"><i style="background:${COLORS[s]}"></i>${t.strategy[s]}</span>`).join("")}</div>
+        <div class="chart" data-chart="fc-temp"></div>
+        <h3 class="mt2">${F.costHourTitle}</h3>
+        <div class="chart small" data-chart="fc-cost"></div>
+        <div class="legend small"><span class="band-key"><i style="background:${COLORS.airco}"></i>${t.strategy.airco}</span><span class="band-key"><i style="background:${COLORS.cv}"></i>${t.strategy.cv}</span></div>
+      </div>
+      <div class="two">
+        <div class="card"><h2>${F.actionsTitle}</h2><div class="timeline">${acts}</div></div>
+        <div>
+          <div class="card"><h2>${F.costDayTitle}</h2>${this._bars((fc.daily || []).map(([d, a, c]) => ({ d: new Date(d + "T12:00:00"), a, c })), (r) => r.d.toLocaleDateString(this.lang, { weekday: "short", day: "numeric" }), (r) => r.d.toLocaleDateString(this.lang, { weekday: "long", day: "numeric", month: "long" }))}</div>
+          <div class="card mt"><h2>${F.splitTitle}</h2>
+            ${this._splitBar([[F.heatUp, split.heat_up || 0, COLORS.target], [F.keepWarm, split.maintain || 0, COLORS.room]])}
+            ${this._splitBar([[t.strategy.airco, split.airco || 0, COLORS.airco], [t.strategy.cv, split.cv || 0, COLORS.cv]])}
+          </div>
+        </div>
+      </div>
+      <div class="card"><h2>${F.savingsTitle}</h2>
+        <div class="muted">${sc.base ? F.savingsText(this._eur(sc.base.week)) : ""}</div>
+        <table class="tbl scen"><tbody>${scen}</tbody></table></div>`;
+  }
+
+  _splitBar(parts) {
+    const total = parts.reduce((s, p) => s + p[1], 0) || 1;
+    return `<div class="splitbar">${parts.map(([l, v, c]) => `<div style="width:${(100 * v / total).toFixed(1)}%;background:${c}" title="${esc(l)}: ${this._eur(v)}"></div>`).join("")}</div>
+      <div class="splitlbl">${parts.map(([l, v, c]) => `<span><i style="background:${c}"></i>${esc(l)} ${Math.round(100 * v / total)}% · ${this._eur(v)}</span>`).join("")}</div>`;
+  }
+
+  _drawForecastCharts() {
+    const fc = this._info?.forecast;
+    if (!fc?.points?.length) return;
+    const pts = fc.points;
+    const x0 = pts[0][0], x1 = pts[pts.length - 1][0];
+    const box = this.shadowRoot.querySelector('[data-chart="fc-temp"]');
+    const target = pts.map((p) => [p[0], p[1]]), room = pts.map((p) => [p[0], p[2]]);
+    const outFc = (this._info.outdoor_forecast || []).filter(([x]) => x >= x0 && x <= x1);
+    const bands = [];
+    for (let i = 0; i + 1 < pts.length; i++) {
+      if (COLORS[pts[i][3]] && pts[i][3] !== "off") bands.push({ x0: pts[i][0], x1: pts[i + 1][0], color: COLORS[pts[i][3]], opacity: pts[i][4] === "boost" ? 0.22 : 0.12 });
+    }
+    const at = (arr, x) => { let v = null; for (const [px, pv] of arr) { if (px <= x) v = pv; else break; } return v; };
+    const midnights = [];
+    const d = new Date(x0); d.setHours(24, 0, 0, 0);
+    for (; d.getTime() < x1; d.setDate(d.getDate() + 1)) midnights.push({ x: d.getTime(), color: "#888", title: d.toLocaleDateString(this.lang, { weekday: "long" }) });
+    if (box) this._svgChart(box, {
+      x0, x1, height: 280, bands, markers: midnights,
+      left: [{ pts: target, color: COLORS.target, step: true }, { pts: room, color: COLORS.room, dash: "4 3" }],
+      right: outFc.length ? [{ pts: outFc, color: COLORS.outdoor, dash: "3 3", width: 1.5 }] : [],
+      tip: (x) => {
+        const p = pts.filter((q) => q[0] <= x).pop() || pts[0];
+        const out = [this._when(new Date(x)), `${this.t.plan}: ${this._fmt(p[1])} °C`, `${this.t.expectedRoom}: ${this._fmt(p[2])} °C`];
+        const o = at(outFc, x); if (o != null) out.push(`${this.t.outdoorFc}: ${this._fmt(o)} °C`);
+        if (p[3] !== "off") out.push(this._stratText(p[3], p[4]));
+        return out;
+      },
+    });
+    const cb = this.shadowRoot.querySelector('[data-chart="fc-cost"]');
+    if (cb) {
+      const W = Math.max(cb.clientWidth, 300), H = 120, m = { l: 54, r: 44, t: 8, b: 22 };
+      const hourly = (fc.hourly || []).filter(([h]) => h >= x0 - 3600e3 && h <= x1);
+      const max = Math.max(...hourly.map(([, a, c]) => a + c), 0.01);
+      const X = (x) => m.l + ((x - x0) / (x1 - x0)) * (W - m.l - m.r);
+      const bw = Math.max(((W - m.l - m.r) / ((x1 - x0) / 3600e3)) - 1, 1);
+      const Y = (v) => (v / max) * (H - m.t - m.b);
+      let bars = "";
+      for (const [h, a, c] of hourly) {
+        const x = X(Math.max(h, x0));
+        const ha = Y(a), hc = Y(c);
+        bars += `<rect x="${x.toFixed(1)}" y="${(H - m.b - hc).toFixed(1)}" width="${bw.toFixed(1)}" height="${hc.toFixed(1)}" fill="${COLORS.cv}"><title>${this._when(new Date(h))}: ${this._eur(a + c)}</title></rect>`;
+        bars += `<rect x="${x.toFixed(1)}" y="${(H - m.b - hc - ha).toFixed(1)}" width="${bw.toFixed(1)}" height="${ha.toFixed(1)}" fill="${COLORS.airco}"><title>${this._when(new Date(h))}: ${this._eur(a + c)}</title></rect>`;
+      }
+      let axis = `<text x="${m.l - 6}" y="${m.t + 8}" class="ax" text-anchor="end">${this._eur(max)}</text><text x="${m.l - 6}" y="${H - m.b}" class="ax" text-anchor="end">${this._eur(0, 0)}</text>`;
+      for (const mk of midnights) axis += `<line x1="${X(mk.x)}" x2="${X(mk.x)}" y1="${m.t}" y2="${H - m.b}" class="gl v"/><text x="${X(mk.x) + 4}" y="${H - 6}" class="ax">${esc(mk.title)}</text>`;
+      cb.innerHTML = `<svg width="${W}" height="${H}">${axis}${bars}<line x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}" class="gl"/></svg>`;
+    }
+  }
+
   // ---------------------------------------------------------------- costs tab
   _costs() {
     const t = this.t;
@@ -748,7 +988,7 @@ class ClimatorPanel extends HTMLElement {
     return `<div class="grid">
         ${this._card(t.today, this._eur(days[29].a + days[29].c), split(days[29]))}
         ${this._card(t.yesterday, this._eur(days[28].a + days[28].c), split(days[28]))}
-        ${this._card(t.expected24, this._eur(this._info?.forecast?.cost))}
+        ${this._card(t.expected24, this._eur(this._fcCost(24)))}
         ${this._card(t.last7, this._eur(sum(days.slice(-7))))}
         ${this._card(t.thisMonth, this._eur(sum(monthNow)))}
         ${this._card(t.last30, this._eur(sum(days)))}
@@ -809,6 +1049,11 @@ class ClimatorPanel extends HTMLElement {
         <div class="pcard"><div class="phead"><b>☀ ${t.solarK}</b>${solarActive ? badge(conf.gs) : ""}</div>
           ${solarActive ? `<div class="pbig">+${pm(th.gs, sd.gs)} °C/${u} <span class="muted">per kW</span></div>
           <div class="sub">${t.solarText(this._fmt(th.gs, 2))}</div><div class="muted">${t.samplesBasis(Math.round(m.counts.solar || 0))}</div>` : `<div class="sub">${t.solarOff}</div>`}</div>
+        ${info.fan?.active ? `<div class="pcard"><div class="phead"><b>🌀 ${t.fanCard}</b>${badge(conf.gab || "none")}</div>
+          <div class="pbig">${th.gab >= 0 ? "+" : ""}${pm(gainA ? (100 * th.gab) / gainA : 0, gainA ? (100 * (sd.gab || 0)) / gainA : 0, 0)}%</div>
+          <div class="sub">${t.fanGain((th.gab >= 0 ? "+" : "") + this._fmt(gainA ? (100 * th.gab) / gainA : 0, 0) + "%")}
+          ${t.fanRates(this._fmt(m.sources.airco.boost_max_rate, 2), this._fmt(m.sources.airco.max_rate, 2), u)}</div>
+          <div class="muted">${t.maxPower(this._fmt(m.pmax.airco_boost, 2), "kW")} (${t.fan.boost}) · ${this._fmt(m.pmax.airco, 2)} kW (${t.fan.comfort}) · ${t.samplesBasis(Math.round(m.counts.boost || 0))}</div></div>` : ""}
       </div>`;
 
     let be = null;
@@ -942,6 +1187,11 @@ class ClimatorPanel extends HTMLElement {
         <div class="profiles">${profile("workday")}${d.weekend_enabled ? profile("weekend") : ""}</div>
         <div class="form"><div>${t.ecoTemp}</div>${num("eco_temp", s.eco_temp, 0.5, "°C")}</div>
         <div class="actions"><span class="muted">${dirty ? t.unsaved : ""}</span><button class="btn primary" data-action="save-schedule" ${dirty ? "" : "disabled"}>${t.save}</button></div></div>
+      <div class="card"><h2>${t.fanTitle}</h2><div class="muted">${t.fanText}</div>
+        ${(info.fan?.modes || []).length ? `<div class="form">
+          <div>${t.fanBoost}</div><select data-setting-str="fan_boost_mode">${this._fanOptions(s.fan_boost_mode, info.fan.boost)}</select>
+          <div>${t.fanComfort}</div><select data-setting-str="fan_comfort_mode">${this._fanOptions(s.fan_comfort_mode, info.fan.comfort)}</select>
+        </div>` : `<div class="sub">${t.fanNone}</div>`}</div>
       <div class="card"><h2>${t.functions}</h2><div class="muted">${t.functionsText}</div>${feats}</div>
       <div class="card"><h2>${t.presenceTitle}</h2>
         <div class="form">
@@ -956,6 +1206,12 @@ class ClimatorPanel extends HTMLElement {
           <div>${t.gas}</div>${num("price_gas", s.price_gas, 0.001, "€/m³", 0, 5)}
         </div></div>
       <div class="card row"><div>${t.advanced}</div><a class="btn" href="/config/integrations/integration/hybrid_heating" target="_top">${t.open}</a></div>`;
+  }
+
+  _fanOptions(chosen, effective) {
+    const modes = this._info?.fan?.modes || [];
+    return `<option value="" ${!chosen ? "selected" : ""}>${this.t.fanAuto} (${esc(effective || "–")})</option>` +
+      modes.map((m) => `<option value="${esc(m)}" ${m === chosen ? "selected" : ""}>${esc(m)}</option>`).join("");
   }
 
   // ---------------------------------------------------------------- events
@@ -999,6 +1255,8 @@ class ClimatorPanel extends HTMLElement {
     if (ds.setting) {
       const v = parseFloat(el.value);
       if (Number.isFinite(v)) this._update({ settings: { [ds.setting]: v } });
+    } else if (ds.settingStr) {
+      this._update({ settings: { [ds.settingStr]: el.value || null } });
     } else if (ds.settingBool) {
       this._update({ settings: { [ds.settingBool]: el.checked } });
     } else if (ds.feature) {
@@ -1138,6 +1396,28 @@ line.gl.v { stroke-dasharray:2 4; }
 .blocks { display:flex; flex-direction:column; gap:8px; margin-bottom:10px; }
 .block { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .block.disabled .field { opacity:.45; }
+select { padding:7px 10px; border-radius:8px; border:1px solid var(--divider-color); background:var(--secondary-background-color, transparent); color:var(--primary-text-color); font:inherit; }
+.card.mt { margin-top:16px; } h3.mt2 { margin-top:18px; }
+.chart.small { min-height:120px; }
+.timeline { display:flex; flex-direction:column; }
+.act { display:grid; grid-template-columns:92px 18px 1fr auto; gap:10px; align-items:start; padding:8px 0; }
+.act .when { font-size:13px; color:var(--secondary-text-color); padding-top:2px; white-space:nowrap; }
+.act .dotline { position:relative; height:100%; display:flex; justify-content:center; }
+.act .dotline:before { content:""; position:absolute; top:0; bottom:-16px; width:2px; background:var(--divider-color); }
+.act:last-child .dotline:before { display:none; }
+.adot { position:relative; width:12px; height:12px; border-radius:50%; margin-top:4px; background:#757575; }
+.adot.airco { background:${COLORS.airco}; } .adot.cv { background:${COLORS.cv}; } .adot.both { background:${COLORS.both}; }
+.act .what b { font-weight:500; font-size:14px; }
+.acost { font-size:13px; color:var(--secondary-text-color); white-space:nowrap; padding-top:2px; }
+.splitbar { display:flex; height:14px; border-radius:7px; overflow:hidden; margin:10px 0 6px; background:rgba(127,127,127,.15); }
+.splitlbl { display:flex; gap:16px; flex-wrap:wrap; font-size:13px; color:var(--secondary-text-color); margin-bottom:6px; }
+.splitlbl i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; }
+.tbl { width:100%; border-collapse:collapse; font-size:14px; margin-top:10px; }
+.tbl td { padding:10px 8px; border-bottom:1px solid var(--divider-color); color:var(--primary-text-color); }
+.tbl tr:last-child td { border-bottom:0; }
+.tbl.scen td { vertical-align:top; }
+.tbl.scen td.num { text-align:right; white-space:nowrap; font-weight:600; }
+.save { color:#66bb6a; } .more { color:#ef5350; }
 @media (max-width: 700px) {
   .toolbar { flex-wrap:wrap; height:auto; padding:8px; gap:8px; }
   .status { display:none; }

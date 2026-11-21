@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant, callback
 from .const import DOMAIN, FEATURES
 
 SETTING_KEYS = {"eco_temp", "away_temp", "vacation_temp", "manual_target", "vacation", "guest",
-                "price_kwh", "price_gas", "mode"}
+                "price_kwh", "price_gas", "mode", "fan_boost_mode", "fan_comfort_mode"}
 
 
 def _ctrl(hass: HomeAssistant, entry_id: str | None):

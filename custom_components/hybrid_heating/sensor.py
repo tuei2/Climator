@@ -29,6 +29,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities: AddE
         CostTodaySensor(ctrl, STRAT_AIRCO), CostTodaySensor(ctrl, STRAT_CV),
         CostTodaySensor(ctrl, "total"), ComfortSensor(ctrl), AccuracySensor(ctrl),
         DiagnosticsSensor(ctrl), ExpectedCostSensor(ctrl), PresenceSensor(ctrl),
+        ExpectedWeekSensor(ctrl), NextActionSensor(ctrl),
     ]
     for s in STRATEGIES:
         entities += [HeatRateSensor(ctrl, s), HeatCostSensor(ctrl, s)]
@@ -56,6 +57,7 @@ class StrategySensor(_Sensor):
         d = self.ctrl.decision
         return {
             "target": d.target,
+            "fan": d.fan,
             "heat_up_options": {
                 o.strategy: {"minutes": round(o.duration_h * 60), "cost_eur": round(o.cost, 3)}
                 for o in d.heat_options
@@ -279,7 +281,57 @@ class ExpectedCostSensor(_Sensor):
 
     @property
     def native_value(self) -> float | None:
-        return self.ctrl.forecast_result.get("cost")
+        return self.ctrl.expected_cost(24)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        fc = self.ctrl.forecast_result
+        return {"next_72h": fc.get("cost"), "hypothetical": self.ctrl.forecast_hypothetical,
+                "per_day": {d: round(a + c, 2) for d, a, c in fc.get("daily") or []}}
+
+
+class ExpectedWeekSensor(_Sensor):
+    """Expected heating cost per week, extrapolated from the 3-day forecast."""
+
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, ctrl) -> None:
+        super().__init__(ctrl, "expected_cost_week")
+
+    @property
+    def native_value(self) -> float | None:
+        fc = self.ctrl.forecast_result
+        if fc.get("cost") is None:
+            return None
+        return round(fc["cost"] * 168 / fc.get("hours", 72), 2)
+
+
+class NextActionSensor(_Sensor):
+    """When Climator will next change something, and what."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, ctrl) -> None:
+        super().__init__(ctrl, "next_action")
+
+    def _next(self):
+        acts = self.ctrl.forecast_result.get("actions") or []
+        return acts[1] if len(acts) > 1 else None
+
+    @property
+    def native_value(self):
+        from datetime import datetime, timezone
+        a = self._next()
+        return datetime.fromtimestamp(a["t"] / 1000, tz=timezone.utc) if a else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        a = self._next()
+        if not a:
+            return {}
+        return {k: a.get(k) for k in ("reason", "strategy", "phase", "target", "fan", "cost")}
 
 
 class PresenceSensor(_Sensor):

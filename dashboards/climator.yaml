@@ -28,6 +28,8 @@ views:
           - sensor.climator_presence
           - sensor.climator_comfort_score
           - sensor.climator_expected_cost_24h
+          - sensor.climator_expected_cost_week
+          - sensor.climator_next_action
       - type: entities
         title: Energy prices
         entities:
@@ -113,6 +115,7 @@ views:
       - type: entities
         title: Functions
         entities:
+          - switch.climator_feature_fan
           - switch.climator_feature_windows
           - switch.climator_feature_presence
           - switch.climator_feature_forecast
