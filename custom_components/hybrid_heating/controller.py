@@ -25,6 +25,7 @@ from .const import (
     DEFAULT_FEATURES, DEFAULT_OPTIONS, DEFAULT_SETTINGS, DOMAIN, MODE_HEAT, MODE_OFF,
     STORAGE_VERSION, UPDATE_INTERVAL_SECONDS, VERSION,
 )
+from .history import async_build_samples
 from .model import SampleCollector, ThermalModel
 from .planner import (
     PHASE_HEAT, PHASE_MAINTAIN, PHASE_OFF, STRAT_AIRCO, STRAT_BOTH, STRAT_CV, STRAT_OFF,
@@ -116,6 +117,9 @@ class HybridHeatingController:
         # smart setback: chosen night/eco level for the current setback period
         self.setback: dict | None = None
         self._last_setback: datetime | None = None
+        # training from recorder history
+        self.history_result: dict | None = None
+        self.history_busy = False
         # self-testing ("explore")
         self.explore: dict | None = None        # running test session
         self.explore_log: list = []
@@ -146,6 +150,7 @@ class HybridHeatingController:
         self.suggestions = data.get("suggestions", [])
         self.weather_bias = data.get("weather_bias", 0.0)
         self.explore_log = data.get("explore_log", [])
+        self.history_result = data.get("history_result")
         self.explore_spent = data.get("explore_spent", {})
         for key in (CONF_PRICE_KWH, CONF_PRICE_GAS):
             self.settings.setdefault(key, float(self.conf[key]))
@@ -155,8 +160,69 @@ class HybridHeatingController:
         self._unsub = async_track_time_interval(
             self.hass, self._async_tick, timedelta(seconds=UPDATE_INTERVAL_SECONDS))
         self.hass.async_create_task(self._async_tick())
+        if self.model.n_eff < 20 and self.history_result is None:
+            # fresh model: learn from what Home Assistant already recorded
+            from homeassistant.helpers.event import async_call_later
+
+            async def _bootstrap(_now) -> None:
+                await self.async_train_from_history(30, automatic=True)
+
+            self._unsub_boot = async_call_later(self.hass, 90, _bootstrap)
+
+    async def async_train_from_history(self, days: int = 30, automatic: bool = False) -> dict:
+        """Rebuild the model from recorder history (replaces the learned data)."""
+        if self.history_busy:
+            return {"error": "busy"}
+        self.history_busy = True
+        self._notify()
+        before = self.model.check()
+        try:
+            res = await async_build_samples(self.hass, self.conf, self.fan_mode_for("boost"), days)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Training from history failed: %s", err)
+            self.history_result = {"error": str(err), "time": dt_util.now().isoformat()}
+            self.history_busy = False
+            self._notify()
+            return self.history_result
+        samples = res["samples"]
+        if len(samples) < 8:
+            self.history_result = {"error": "too_little_data", "time": dt_util.now().isoformat(),
+                                   "n_state": res["n_state"], "n_hourly": res["n_hourly"]}
+        else:
+            new = ThermalModel()
+
+            def _train() -> None:
+                for smp in samples:
+                    new.add_sample(smp)
+                new.estimate_pmax(samples)
+                new.excluded = dict(res["excluded"])
+
+            await self.hass.async_add_executor_job(_train)
+            self.model.__dict__.update(new.__dict__)
+            self.collector.reset()
+            after = self.model.check()
+            self.history_result = {
+                "time": dt_util.now().isoformat(), "days": days, "automatic": automatic,
+                "from": res["from"], "state_from": res["state_from"], "to": res["to"],
+                "n_state": res["n_state"], "n_hourly": res["n_hourly"],
+                "excluded": res["excluded"],
+                "mae_before": round(before["mae_1h"], 3) if before["mae_1h"] is not None else None,
+                "mae_after": round(after["mae_1h"], 3) if after["mae_1h"] is not None else None,
+            }
+            self._last_forecast_calc = None
+            self._last_setback = None
+            self._last_scenarios = None
+            _LOGGER.info("Model rebuilt from history: %s state samples, %s hourly samples",
+                         res["n_state"], res["n_hourly"])
+        self.history_busy = False
+        await self._store.async_save(self._data())
+        self._notify()
+        return self.history_result
 
     async def async_shutdown(self) -> None:
+        if getattr(self, "_unsub_boot", None):
+            self._unsub_boot()
+            self._unsub_boot = None
         if self._unsub:
             self._unsub()
             self._unsub = None
@@ -169,6 +235,7 @@ class HybridHeatingController:
             "day_start": self.day_start, "comfort": self.comfort, "events": self.events,
             "suggestions": self.suggestions, "weather_bias": self.weather_bias,
             "explore_log": self.explore_log, "explore_spent": self.explore_spent,
+            "history_result": self.history_result,
         }
 
     def _save(self) -> None:
@@ -865,7 +932,8 @@ class HybridHeatingController:
         if not c.get(CONF_DHW):
             add("dhw_missing", "info")
         if self.model.clamped:
-            add("model_bounds", "warn", params=self.model.clamped)
+            crit = [p for p in self.model.clamped if p in ("k", "ga0", "gc")]
+            add("model_bounds", "warn" if crit else "info", params=self.model.clamped)
         chk = self.model.check()
         if chk["mae_1h"] is None:
             add("model_accuracy", "info", n=chk["n"])
@@ -968,6 +1036,7 @@ class HybridHeatingController:
             "forecast_hypothetical": self.forecast_hypothetical,
             "scenarios": self.scenarios,
             "setback": self.setback if self.features.get("smart_setback") else None,
+            "history": {"busy": self.history_busy, "result": self.history_result},
             "explore": {
                 "active": self.feature_active("explore"),
                 "session": ({**self.explore, "since": self.explore["since"].isoformat()}

@@ -256,6 +256,16 @@
           "description": "Onderdeel dat gewist wordt."
         }
       }
+    },
+    "train_from_history": {
+      "name": "Leren uit geschiedenis",
+      "description": "Bouwt het model opnieuw op uit de geschiedenis die Home Assistant heeft opgeslagen.",
+      "fields": {
+        "days": {
+          "name": "Dagen",
+          "description": "Hoeveel dagen terug (uurstatistieken voor de periode vóór de gedetailleerde geschiedenis)."
+        }
+      }
     }
   },
   "selector": {

@@ -1,7 +1,8 @@
 """Physics-based thermal model of the room (pure python, no Home Assistant imports).
 
     dT/dt = -k * (T_in - T_out)                 heat loss to outside
-            + (ga0 + ga1 * T_out) * P_airco     air conditioner, P in kW electric
+            + (ga0 + ga1 * (T_out - 5)) * P_airco   air conditioner, P in kW electric
+                                                    (ga0 = gain at 5 degC outside)
             + gab * P_airco * boost             extra heat per kW when the fan blows hard
             + gc * G_cv                          boiler, G in m3 gas per hour
             + gs * S                             sun, S = solar power in kW (optional)
@@ -19,14 +20,19 @@ from dataclasses import dataclass, field
 
 PARAMS = ["k", "ga0", "ga1", "gc", "gs", "gab"]
 N = len(PARAMS)
-PRIOR = {"k": 0.04, "ga0": 0.85, "ga1": 0.03, "gc": 2.0, "gs": 0.0, "gab": 0.0}
+PRIOR = {"k": 0.04, "ga0": 1.0, "ga1": 0.03, "gc": 2.0, "gs": 0.0, "gab": 0.0}
+T_REF = 5.0             # outdoor temperature the airco gain ga0 refers to
 # typical magnitude of each feature, used to scale the prior strength
-FEATURE_SCALE = {"k": 15.0, "ga0": 0.8, "ga1": 6.0, "gc": 0.8, "gs": 1.5, "gab": 1.0}
+FEATURE_SCALE = {"k": 15.0, "ga0": 0.8, "ga1": 4.0, "gc": 0.8, "gs": 1.5, "gab": 1.0}
 PRIOR_SAMPLES = 5.0
 FORGET = 0.999          # per sample (15 min) -> half-life ~7 days
 SAMPLE_MINUTES = 15
-BOUNDS = {"k": (0.003, 0.5), "ga0": (0.0, 10.0), "ga1": (-0.2, 0.3),
-          "gc": (0.0, 15.0), "gs": (-0.5, 5.0), "gab": (-1.0, 3.0)}
+# Physical limits. A heat pump never gets *less* efficient when it is warmer outside
+# (ga1 >= 0), the sun never cools the room (gs >= 0) and every source adds heat.
+BOUNDS = {"k": (0.003, 0.5), "ga0": (0.05, 10.0), "ga1": (0.0, 0.15),
+          "gc": (0.05, 15.0), "gs": (0.0, 5.0), "gab": (-0.3, 3.0)}
+# parameters whose limit means the data is suspicious (others hitting a limit is normal)
+CRITICAL = ("k", "ga0", "gc")
 # maximum input per source: airco (soft/auto fan) and airco_boost in kW electric, cv in m3/h
 DEFAULT_PMAX = {"airco": 0.8, "airco_boost": 1.2, "cv": 1.0}
 BUFFER_MAX = 7 * 24 * 60 // SAMPLE_MINUTES  # keep 7 days of samples
@@ -82,7 +88,7 @@ class Sample:
         return (self.t_in0 + self.t_in1) / 2
 
     def features(self) -> list[float]:
-        return [self.t_out - self.t_mid, self.p_airco, self.p_airco * self.t_out,
+        return [self.t_out - self.t_mid, self.p_airco, self.p_airco * (self.t_out - T_REF),
                 self.g_cv, self.solar, self.p_airco * self.boost]
 
     def to_list(self) -> list:
@@ -121,6 +127,7 @@ class ThermalModel:
             "res2": self.res2, "pmax": self.pmax, "excluded": self.excluded,
             "samples": [s.to_list() for s in self.samples],
             "last_seen": self.last_seen,
+            "centered": True,
         }
 
     @classmethod
@@ -134,6 +141,17 @@ class ThermalModel:
                     g["ata"] = [row + [0.0] * (N - n_old) for row in g["ata"]] + \
                         [[0.0] * N for _ in range(N - n_old)]
                     g["atb"] = g["atb"] + [0.0] * (N - n_old)
+            if not d.get("centered"):
+                # v0.8 and older used P*T_out as feature; convert to P*(T_out - T_REF):
+                # x2' = x2 - T_REF*x1  ->  A' = M A M^T, b' = M b
+                i1, i2 = PARAMS.index("ga0"), PARAMS.index("ga1")
+                for g in groups.values():
+                    A, B = g["ata"], g["atb"]
+                    B[i2] -= T_REF * B[i1]
+                    for j in range(N):
+                        A[i2][j] -= T_REF * A[i1][j]
+                    for j in range(N):
+                        A[j][i2] -= T_REF * A[j][i1]
             m.groups = groups
             m.n_eff = d.get("n_eff", 0.0)
             m.counts.update(d.get("counts", {}))
@@ -171,15 +189,36 @@ class ThermalModel:
                 b[i] += g["atb"][i]
                 for j in range(N):
                     a[i][j] += g["ata"][i][j]
-        sol = _solve(a, b) or [PRIOR[p] for p in PARAMS]
-        self.clamped = []
-        theta = {}
-        for p, v in zip(PARAMS, sol):
-            lo, hi = BOUNDS[p]
-            if v < lo or v > hi:
-                self.clamped.append(p)
-            theta[p] = min(hi, max(lo, v))
-        self.theta = theta
+        # Least squares within physical limits (active set): a parameter that falls outside
+        # its limit is fixed at that limit and the others are solved again, so they adapt
+        # consistently instead of compensating for an impossible value.
+        fixed: dict[int, float] = {}
+        sol = None
+        for _ in range(N + 1):
+            free = [i for i in range(N) if i not in fixed]
+            ar = [[a[i][j] for j in free] for i in free]
+            br = [b[i] - sum(a[i][j] * v for j, v in fixed.items()) for i in free]
+            part = _solve(ar, br) if free else []
+            if part is None:
+                sol = [PRIOR[p] for p in PARAMS]
+                break
+            sol = [0.0] * N
+            for i, v in fixed.items():
+                sol[i] = v
+            for idx, i in enumerate(free):
+                sol[i] = part[idx]
+            worst, dist = None, 0.0
+            for i in free:
+                lo, hi = BOUNDS[PARAMS[i]]
+                d = (lo - sol[i]) if sol[i] < lo else (sol[i] - hi) if sol[i] > hi else 0.0
+                if d > dist:
+                    worst, dist = i, d
+            if worst is None:
+                break
+            lo, hi = BOUNDS[PARAMS[worst]]
+            fixed[worst] = lo if sol[worst] < lo else hi
+        self.clamped = [PARAMS[i] for i in fixed]
+        self.theta = {p: min(BOUNDS[p][1], max(BOUNDS[p][0], v)) for p, v in zip(PARAMS, sol)}
         self._a_full = a
 
     def predict_slope(self, s: Sample) -> float:
@@ -219,6 +258,18 @@ class ThermalModel:
         self.solve()
         return residual
 
+    def estimate_pmax(self, samples: list) -> None:
+        """Maximum input per source from history (90th percentile of heating samples)."""
+        def p90(vals):
+            vals = sorted(vals)
+            return vals[int(0.9 * (len(vals) - 1))] if len(vals) >= 6 else None
+        soft = p90([s.p_airco for s in samples if s.p_airco >= 0.05 and s.boost < 0.5])
+        hard = p90([s.p_airco for s in samples if s.p_airco >= 0.05 and s.boost >= 0.5])
+        gas = p90([s.g_cv for s in samples if s.g_cv >= 0.01])
+        for key, val in (("airco", soft), ("airco_boost", hard), ("cv", gas)):
+            if val:
+                self.pmax[key] = val
+
     def exclude(self, reason: str) -> None:
         self.excluded[reason] = self.excluded.get(reason, 0) + 1
 
@@ -253,7 +304,7 @@ class ThermalModel:
         """degC per hour per unit of input (kW for airco, m3/h for cv)."""
         th = self.theta
         if source == "airco":
-            return max(th["ga0"] + th["ga1"] * t_out + th["gab"] * boost, 0.05)
+            return max(th["ga0"] + th["ga1"] * (t_out - T_REF) + th["gab"] * boost, 0.05)
         return max(th["gc"], 0.05)
 
     def pmax_key(self, source: str, boost: bool) -> str:

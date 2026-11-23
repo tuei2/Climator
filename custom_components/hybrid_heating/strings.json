@@ -256,6 +256,16 @@
           "description": "Part to reset."
         }
       }
+    },
+    "train_from_history": {
+      "name": "Train from history",
+      "description": "Rebuilds the model from the history recorded by Home Assistant.",
+      "fields": {
+        "days": {
+          "name": "Days",
+          "description": "How many days back (hourly statistics before the detailed history)."
+        }
+      }
     }
   },
   "selector": {

@@ -29,6 +29,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_update)
     websocket_api.async_register_command(hass, ws_suggestion)
     websocket_api.async_register_command(hass, ws_reset)
+    websocket_api.async_register_command(hass, ws_train_history)
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/info",
@@ -101,3 +102,18 @@ async def ws_reset(hass, connection, msg):
         return
     await ctrl.async_reset(msg["scope"])
     connection.send_result(msg["id"], ctrl.info())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/train_history",
+    vol.Optional("entry_id"): str,
+    vol.Optional("days", default=30): vol.All(int, vol.Range(min=1, max=365)),
+})
+@websocket_api.async_response
+async def ws_train_history(hass, connection, msg):
+    ctrl = _ctrl(hass, msg.get("entry_id"))
+    if ctrl is None:
+        connection.send_error(msg["id"], "not_found", "Climator is not set up")
+        return
+    result = await ctrl.async_train_from_history(msg["days"])
+    connection.send_result(msg["id"], {"result": result, "info": ctrl.info()})

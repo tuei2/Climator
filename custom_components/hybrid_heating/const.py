@@ -102,4 +102,4 @@ DEFAULT_FEATURES = {f: f not in ("buffer", "night") for f in FEATURES}
 
 UPDATE_INTERVAL_SECONDS = 60
 STORAGE_VERSION = 1
-VERSION = "0.8.0"
+VERSION = "0.9.0"

@@ -36,11 +36,17 @@ Climator describes the room with one simple physics equation, in °C per hour:
 
 ```
 dT/dt = − k · (T_room − T_outside)          heat loss
-        + (ga0 + ga1 · T_outside) · P_airco  air conditioner (P in kW electric)
+        + (ga0 + ga1 · (T_outside − 5)) · P_airco   air conditioner (P in kW electric;
+                                                    ga0 = gain at 5 °C outside)
         + gab · P_airco · boost              extra heat when the fan blows hard
         + gc · G_cv                           boiler (G in m³ gas per hour)
         + gs · S                              sun (S = solar panel power in kW)
 ```
+
+The parameters are kept within physical limits — a heat pump never gets less efficient when
+it is warmer outside (`ga1 ≥ 0`), the sun never cools the room, every source adds heat. When
+the data pushes a parameter past its limit, it is fixed at the limit and the other parameters
+are solved again, so they stay consistent.
 
 Every 15 minutes it takes a sample (room and outdoor temperature, airco energy, gas, solar)
 and updates the parameters with weighted least squares — **in every mode, also in Learn only
@@ -57,6 +63,16 @@ With the model Climator can:
 - calculate the cost per hour to keep the room warm with each source;
 - simulate the coming 24 hours (expected room temperature, plan and cost);
 - find the latest preheat start that still reaches the comfort temperature in time.
+
+### Learning from history
+Climator does not have to start from zero: it can rebuild the model from what Home Assistant
+already recorded for the configured entities — the detailed state history (recorder, default
+the last 10 days, replayed minute by minute with the same hot-water/window exclusions and fan
+modes) and, for the period before that, the hourly long-term statistics. This happens
+automatically the first time Climator starts with an empty model, and can be started any time
+in the **Model** tab (*Learn from history*, 7–90 days) or with the service
+`hybrid_heating.train_from_history`. It replaces the current model and shows the prediction
+error before and after.
 
 ### Is the model right?
 The **Model** tab of the panel shows:

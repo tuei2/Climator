@@ -39,6 +39,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: HybridConfigEntry) -> bo
             schema=vol.Schema({vol.Optional("scope", default="model"): vol.In(RESET_SCOPES)}))
         async_register_ws(hass)
 
+        async def _train(call: ServiceCall) -> None:
+            for e in hass.config_entries.async_loaded_entries(DOMAIN):
+                await e.runtime_data.async_train_from_history(call.data.get("days", 30))
+
+        hass.services.async_register(
+            DOMAIN, "train_from_history", _train,
+            schema=vol.Schema({vol.Optional("days", default=30): vol.All(int, vol.Range(min=1, max=365))}))
+
     await async_register_panel(hass)
     ctrl.async_start()
     return True

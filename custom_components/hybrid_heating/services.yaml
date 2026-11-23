@@ -12,3 +12,12 @@ reset_learning:
             - comfort
             - suggestions
             - weather
+train_from_history:
+  fields:
+    days:
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 365
+          unit_of_measurement: d

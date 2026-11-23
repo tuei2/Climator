@@ -181,6 +181,14 @@ const I18N = {
       max: "Highest night temperature", hint: "The lowest level is your eco temperature (schedule).",
       yours: "your setting", best: "chosen",
     },
+    hist: {
+      title: "Learn from history", text: "Rebuild the model from what Home Assistant has already recorded for your sensors: the detailed history (default the last 10 days, per minute) and, before that, the hourly statistics. This replaces the current model.",
+      days: "Period", run: "Rebuild model", busy: "Working… this can take a minute.",
+      confirm: (d) => `Rebuild the model from the last ${d} days? The current model is replaced.`,
+      result: (r) => `Rebuilt ${r.time}: ${r.n_state} samples from detailed history${r.n_hourly ? ` and ${r.n_hourly} hourly samples from statistics` : ""}.`,
+      fit: (b, a) => `Prediction error: ${b ?? "–"} → ${a ?? "–"} °C.`, auto: "Done automatically at first start.",
+      error: (e) => `Failed: ${e === "too_little_data" ? "not enough usable data in the history" : e}`,
+    },
     mode: "Mode", functions: "Functions", functionsText: "Optional functions. Switch off what you don't want; Climator then simply ignores it.",
     feat: {
       smart_setback: ["Smart night temperature", "Pick the cheapest night temperature from the model and the weather forecast."],
@@ -362,6 +370,14 @@ const I18N = {
       chartTitle: "Verwachte kosten per nachtniveau (tot het volgende comfortblok)",
       max: "Hoogste nachttemperatuur", hint: "Het laagste niveau is je eco-temperatuur (schema).",
       yours: "jouw instelling", best: "gekozen",
+    },
+    hist: {
+      title: "Leren uit geschiedenis", text: "Bouw het model opnieuw op uit wat Home Assistant al heeft opgeslagen voor je sensoren: de gedetailleerde geschiedenis (standaard de laatste 10 dagen, per minuut) en daarvóór de uurstatistieken. Dit vervangt het huidige model.",
+      days: "Periode", run: "Model opnieuw opbouwen", busy: "Bezig… dit kan een minuut duren.",
+      confirm: (d) => `Het model opnieuw opbouwen uit de laatste ${d} dagen? Het huidige model wordt vervangen.`,
+      result: (r) => `Opnieuw opgebouwd ${r.time}: ${r.n_state} metingen uit de gedetailleerde geschiedenis${r.n_hourly ? ` en ${r.n_hourly} uurmetingen uit statistieken` : ""}.`,
+      fit: (b, a) => `Voorspelfout: ${b ?? "–"} → ${a ?? "–"} °C.`, auto: "Automatisch gedaan bij de eerste start.",
+      error: (e) => `Mislukt: ${e === "too_little_data" ? "te weinig bruikbare data in de geschiedenis" : e}`,
     },
     mode: "Modus", functions: "Functies", functionsText: "Optionele functies. Zet uit wat je niet wilt; Climator negeert het dan gewoon.",
     feat: {
@@ -1119,7 +1135,7 @@ class ClimatorPanel extends HTMLElement {
     const pm = (v, s, d = 2) => `${this._fmt(v, d)}${s > 0 && Number.isFinite(s) ? ` <span class="muted">± ${this._fmt(s, d)}</span>` : ""}`;
     const pr = this._prices();
     const u = this._hUnit;
-    const gainA = Math.max(th.ga0 + th.ga1 * tOut, 0.05);
+    const gainA = Math.max(th.ga0 + th.ga1 * (tOut - 5), 0.05);
     const night = tOut + (20 - tOut) * Math.exp(-th.k * 8);
     const solarActive = info.features_active?.solar;
 
@@ -1147,13 +1163,17 @@ class ClimatorPanel extends HTMLElement {
           <div class="muted">${t.maxPower(this._fmt(m.pmax.airco_boost, 2), "kW")} (${t.fan.boost}) · ${this._fmt(m.pmax.airco, 2)} kW (${t.fan.comfort}) · ${t.samplesBasis(Math.round(m.counts.boost || 0))}</div></div>` : ""}
       </div>`;
 
-    let be = null;
-    for (let x = 20; x >= -15; x--) {
-      const ca = pr.kwh / Math.max(th.ga0 + th.ga1 * x, 0.05), cc = pr.gas / Math.max(th.gc, 0.05);
-      if (ca > cc) { be = x; break; }
+    const segs = [];
+    for (let x = -15; x <= 20; x++) {
+      const ca = pr.kwh / Math.max(th.ga0 + th.ga1 * (x - 5), 0.05), cc = pr.gas / Math.max(th.gc, 0.05);
+      const w = ca <= cc ? "airco" : "cv";
+      if (segs.length && segs[segs.length - 1].w === w) segs[segs.length - 1].to = x;
+      else segs.push({ w, from: x, to: x });
     }
     const caNow = pr.kwh / gainA, ccNow = pr.gas / Math.max(th.gc, 0.05);
-    const beText = be === null ? t.noBreakeven(t.strategy.airco) : be >= 20 ? t.noBreakeven(t.strategy.cv) : t.breakeven(be + 1);
+    const beText = segs.length === 1 ? t.noBreakeven(t.strategy[segs[0].w])
+      : segs.length === 2 && segs[0].w === "cv" ? t.breakeven(segs[1].from)
+      : segs.map((g) => `${g.from}…${g.to} °C: ${t.strategy[g.w]}`).join(" · ");
 
     const diag = (info.diagnostics || []).map((d) => {
       const tx = t.diagText;
@@ -1185,6 +1205,7 @@ class ClimatorPanel extends HTMLElement {
         <div class="sub">${beText} (${t.strategy.airco} ${this._eur(caNow, 3)}/°C · ${t.strategy.cv} ${this._eur(ccNow, 3)}/°C ${t.nowWord})</div>
         <div class="legend"><span class="band-key"><i class="line" style="--c:${COLORS.airco}"></i>${t.strategy.airco}</span><span class="band-key"><i class="line" style="--c:${COLORS.cv}"></i>${t.strategy.cv}</span></div>
         <div class="chart" data-chart="breakeven"></div></div>
+      ${this._historyCard()}
       ${this._exploreCard()}
       <div class="two">
         <div class="card"><h2>${t.diagTitle}</h2>${diag}</div>
@@ -1197,6 +1218,20 @@ class ClimatorPanel extends HTMLElement {
           <div class="resets">${Object.entries(t.scopes).map(([k, v]) => `<button class="btn ${k === "all" ? "danger" : ""}" data-action="reset" data-value="${k}">${v}</button>`).join("")}</div>
         </div>
       </div>`;
+  }
+
+  _historyCard() {
+    const t = this.t, H = t.hist, h = this._info?.history || {};
+    const r = h.result;
+    let res = "";
+    if (r && r.error) res = `<div class="sub more">${esc(H.error(r.error))}</div>`;
+    else if (r) res = `<div class="sub">${esc(H.result({ ...r, time: this._when(new Date(r.time)) }))} ${esc(H.fit(r.mae_before, r.mae_after))} ${r.automatic ? esc(H.auto) : ""}</div>`;
+    const days = this._histDays || 30;
+    return `<div class="card"><h2>📚 ${H.title}</h2><div class="muted">${H.text}</div>
+      <div class="histrow"><label class="field"><span>${H.days}</span>
+        <select data-hist-days>${[7, 14, 30, 60, 90].map((d) => `<option value="${d}" ${d === days ? "selected" : ""}>${d} ${this.lang.startsWith("nl") ? "dagen" : "days"}</option>`).join("")}</select></label>
+        <button class="btn primary" data-action="train-history" ${h.busy || this._histBusy ? "disabled" : ""}>${h.busy || this._histBusy ? H.busy : H.run}</button></div>
+      ${res}</div>`;
   }
 
   _exploreCard() {
@@ -1235,18 +1270,18 @@ class ClimatorPanel extends HTMLElement {
       const pr = this._prices();
       const a = [], c = [];
       for (let x = -15; x <= 20; x++) {
-        a.push([x, pr.kwh / Math.max(th.ga0 + th.ga1 * x, 0.05)]);
+        a.push([x, pr.kwh / Math.max(th.ga0 + th.ga1 * (x - 5), 0.05)]);
         c.push([x, pr.gas / Math.max(th.gc, 0.05)]);
       }
       const top = Math.max(...[...a, ...c].map((p) => p[1])) * 1.15;
-      const step = top > 1 ? 0.25 : top > 0.4 ? 0.1 : 0.05;
+      const step = [0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 5].find((st) => top / st <= 6) || 10;
       this._svgChart(be, {
         x0: -15, x1: 20, xNumeric: true, height: 200, yRange: [0, Math.ceil(top / step) * step], yStep: step,
         yFmt: (v) => this._eur(v, 2),
         left: [{ pts: a, color: COLORS.airco }, { pts: c, color: COLORS.cv }],
         tip: (x) => {
           const xi = Math.round(x);
-          return [`${xi} °C`, `${this.t.strategy.airco}: ${this._eur(pr.kwh / Math.max(th.ga0 + th.ga1 * xi, 0.05), 3)}/°C`,
+          return [`${xi} °C`, `${this.t.strategy.airco}: ${this._eur(pr.kwh / Math.max(th.ga0 + th.ga1 * (xi - 5), 0.05), 3)}/°C`,
             `${this.t.strategy.cv}: ${this._eur(pr.gas / Math.max(th.gc, 0.05), 3)}/°C`];
         },
       });
@@ -1369,6 +1404,15 @@ class ClimatorPanel extends HTMLElement {
         this._render(true); break;
       }
       case "del-block": { const [p, i] = v.split(":"); d.profiles[p].splice(+i, 1); this._render(true); break; }
+      case "train-history": {
+        const days = this._histDays || 30;
+        if (!confirm(this.t.hist.confirm(days))) break;
+        this._histBusy = true; this._render(true);
+        this._ws({ type: "hybrid_heating/train_history", days }).then((r) => { this._info = r.info; })
+          .catch((e) => { this._toast = e?.message || String(e); })
+          .finally(() => { this._histBusy = false; this._render(true); });
+        break;
+      }
       case "save-schedule": this._update({ schedule: d }).then(() => { this._draft = null; this._render(true); }); break;
     }
   }
@@ -1379,6 +1423,8 @@ class ClimatorPanel extends HTMLElement {
     if (ds.setting) {
       const v = parseFloat(el.value);
       if (Number.isFinite(v)) this._update({ settings: { [ds.setting]: v } });
+    } else if (el.hasAttribute("data-hist-days")) {
+      this._histDays = +el.value;
     } else if (ds.settingStr) {
       this._update({ settings: { [ds.settingStr]: el.value || null } });
     } else if (ds.settingBool) {
@@ -1549,6 +1595,7 @@ select { padding:7px 10px; border-radius:8px; border:1px solid var(--divider-col
 .sbbar div { height:100%; background:#78909c; border-radius:6px; }
 .sbrow.chosen .sbbar div { background:#66bb6a; } .sbrow.chosen { font-weight:600; }
 .sbval { text-align:right; } .sbtag { color:var(--secondary-text-color); font-size:12px; }
+.histrow { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin:12px 0 8px; }
 .banner.info { border-color:#42a5f5; background:rgba(66,165,245,.12); }
 .two.inner { gap:24px; }
 .kv .chip { font-size:12px; margin-right:6px; }
