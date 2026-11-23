@@ -575,3 +575,49 @@ def choose_setback(base: Inputs, model: ThermalModel, max_temp: float, include_o
         "comfort_temp": nb[1], "hours": round(hours, 1), "t_out_min": round(min(
             base.outdoor(now + timedelta(hours=h)) for h in range(int(hours) + 1)), 1),
     }
+
+
+def both_analysis(model: ThermalModel, prices: Prices, low: float, high: float, boost: bool,
+                  max_preheat_h: float, temps=(-10, -5, 0, 5, 10, 15)) -> dict:
+    """Is it worth running airco and boiler at the same time?
+
+    For each outdoor temperature: heating up from `low` to `high` with airco, boiler or both.
+    Costs are compared over the same time window (the slowest option): a faster option
+    keeps the room at `low` (cheapest source) while it waits, then heats up.
+    """
+    rows = []
+    for t_out in temps:
+        opts = {}
+        for s in (STRAT_AIRCO, STRAT_CV, STRAT_BOTH):
+            dur = model.time_to(low, high, t_out, model.heat_rate(s, t_out, boost))
+            if dur is None or dur > 24:
+                opts[s] = {"hours": None, "cost": None}
+                continue
+            opts[s] = {"hours": round(dur, 2),
+                       "heat_cost": dur * full_cost_per_hour(model, s, prices, boost)}
+        finite = [o["hours"] for o in opts.values() if o["hours"] is not None]
+        if not finite:
+            rows.append({"t_out": t_out, "options": opts, "cheapest": None, "fastest": None})
+            continue
+        window = min(max(finite), 12.0)
+        limit = max(min(2 * max_preheat_h, 8.0), max_preheat_h)   # same rule as the planner
+        wait = maintain_costs(model, [STRAT_AIRCO, STRAT_CV], low, t_out, prices)
+        wait_h = min((v for v in wait.values() if v < INF), default=0.0)
+        for o in opts.values():
+            if o["hours"] is None:
+                continue
+            o["cost"] = round(o.pop("heat_cost") + wait_h * max(window - o["hours"], 0.0), 3)
+            o["fits"] = o["hours"] <= limit
+        valid = {s: o for s, o in opts.items() if o["cost"] is not None}
+        fitting = {s: o for s, o in valid.items() if o["fits"]}
+        cheapest = min(valid, key=lambda s: valid[s]["cost"])
+        best_in_time = min(fitting, key=lambda s: fitting[s]["cost"]) if fitting else \
+            min(valid, key=lambda s: valid[s]["hours"])
+        rows.append({"t_out": t_out, "options": opts, "cheapest": cheapest,
+                     "fastest": min(valid, key=lambda s: valid[s]["hours"]),
+                     "advice": best_in_time,
+                     "both_needed": best_in_time == STRAT_BOTH})
+    needed = [r["t_out"] for r in rows if r.get("both_needed")]
+    return {"low": low, "high": high, "max_preheat_h": max(min(2 * max_preheat_h, 8.0), max_preheat_h),
+            "boost": boost,
+            "rows": rows, "both_needed_below": max(needed) if needed else None}

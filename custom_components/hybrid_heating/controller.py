@@ -29,7 +29,7 @@ from .history import async_build_samples
 from .model import SampleCollector, ThermalModel
 from .planner import (
     PHASE_HEAT, PHASE_MAINTAIN, PHASE_OFF, STRAT_AIRCO, STRAT_BOTH, STRAT_CV, STRAT_OFF,
-    Decision, Inputs, Planner, Prices, choose_setback, forecast, what_if,
+    Decision, Inputs, Planner, Prices, both_analysis, choose_setback, forecast, what_if,
 )
 from .schedule import _t as parse_hhmm
 from .schedule import DEFAULT_SCHEDULE, comfort_at, validate
@@ -754,6 +754,15 @@ class HybridHeatingController:
         finally:
             self._forecast_busy = False
 
+    def _both_analysis(self) -> dict:
+        blocks = [b for p in self.schedule["profiles"].values() for b in p if b.get("enabled", True)]
+        high = max((b["temp"] for b in blocks), default=20.5)
+        low = float(self.settings["eco_temp"])
+        if low >= high:
+            low = high - 3
+        return both_analysis(self.model, self.prices, low, high, self.feature_active("fan"),
+                             float(self.conf[CONF_MAX_PREHEAT]) / 60)
+
     def expected_cost(self, hours: float) -> float | None:
         hourly = self.forecast_result.get("hourly") or []
         if not hourly:
@@ -1027,6 +1036,7 @@ class HybridHeatingController:
                 "rmse_slope": round(m.res2 ** 0.5, 3),
                 "check": {k: (round(v, 3) if isinstance(v, float) else v) for k, v in chk.items()},
                 "replay": m.replay(48),
+                "ga1_typical": m.ga1_typical,
                 "sources": sources, "t_out": self.t_out,
                 "last_sample": self.last_sample_reason,
             },
@@ -1036,6 +1046,7 @@ class HybridHeatingController:
             "forecast_hypothetical": self.forecast_hypothetical,
             "scenarios": self.scenarios,
             "setback": self.setback if self.features.get("smart_setback") else None,
+            "both": self._both_analysis(),
             "history": {"busy": self.history_busy, "result": self.history_result},
             "explore": {
                 "active": self.feature_active("explore"),

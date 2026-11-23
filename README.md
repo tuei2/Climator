@@ -43,8 +43,10 @@ dT/dt = − k · (T_room − T_outside)          heat loss
         + gs · S                              sun (S = solar panel power in kW)
 ```
 
-The parameters are kept within physical limits — a heat pump never gets less efficient when
-it is warmer outside (`ga1 ≥ 0`), the sun never cools the room, every source adds heat. When
+The parameters are kept within physical limits — the air conditioner loses 2–6 % of its output
+per degree colder outside (`ga1` between 2 % and 6 % of `ga0`; when your data does not show this
+yet, the typical 2 % is used and the panel says so), the sun never cools the room, every source
+adds heat. When
 the data pushes a parameter past its limit, it is fixed at the limit and the other parameters
 are solved again, so they stay consistent.
 
@@ -73,6 +75,12 @@ automatically the first time Climator starts with an empty model, and can be sta
 in the **Model** tab (*Learn from history*, 7–90 days) or with the service
 `hybrid_heating.train_from_history`. It replaces the current model and shows the prediction
 error before and after.
+
+### Air conditioner and boiler together?
+The **Model** tab shows, per outdoor temperature, how long heating up from the eco to the comfort
+temperature takes and what it costs with the air conditioner, the boiler or both, compared over
+the same time window. Per degree, both together is always a mix of the two prices — never cheaper
+than the cheapest source — so it only pays off when one source alone is not in time.
 
 ### Is the model right?
 The **Model** tab of the panel shows:

@@ -189,6 +189,15 @@ const I18N = {
       fit: (b, a) => `Prediction error: ${b ?? "–"} → ${a ?? "–"} °C.`, auto: "Done automatically at first start.",
       error: (e) => `Failed: ${e === "too_little_data" ? "not enough usable data in the history" : e}`,
     },
+    both: {
+      title: "Air conditioner and boiler together: when is it worth it?",
+      text: (lo, hi, h) => `Heating up from ${lo} to ${hi} °C per outdoor temperature. Costs are compared over the same time: a faster option keeps the room at ${lo} °C while it waits. Preheating may take up to ${h} hours.`,
+      outdoor: "Outdoor", advice: "Best choice", never: "not possible",
+      verdictNever: "Both together is never needed: one source is always in time and cheaper.",
+      verdictBelow: (t) => `Both together is only worth it at ${t} °C and colder — not because it is cheaper per degree, but because one source alone is not in time.`,
+      perDeg: "Per degree, both together is always a mix of the two prices, so it is never cheaper than the cheapest source alone. Its only benefit is speed.",
+      typical: "The outdoor-temperature effect of the air conditioner is not visible in your data yet; a typical value (2 % per °C) is used.",
+    },
     mode: "Mode", functions: "Functions", functionsText: "Optional functions. Switch off what you don't want; Climator then simply ignores it.",
     feat: {
       smart_setback: ["Smart night temperature", "Pick the cheapest night temperature from the model and the weather forecast."],
@@ -378,6 +387,15 @@ const I18N = {
       result: (r) => `Opnieuw opgebouwd ${r.time}: ${r.n_state} metingen uit de gedetailleerde geschiedenis${r.n_hourly ? ` en ${r.n_hourly} uurmetingen uit statistieken` : ""}.`,
       fit: (b, a) => `Voorspelfout: ${b ?? "–"} → ${a ?? "–"} °C.`, auto: "Automatisch gedaan bij de eerste start.",
       error: (e) => `Mislukt: ${e === "too_little_data" ? "te weinig bruikbare data in de geschiedenis" : e}`,
+    },
+    both: {
+      title: "Airco en CV tegelijk: wanneer loont het?",
+      text: (lo, hi, h) => `Opwarmen van ${lo} naar ${hi} °C per buitentemperatuur. De kosten worden over dezelfde tijd vergeleken: een snellere optie houdt de kamer op ${lo} °C terwijl hij wacht. Voorverwarmen mag maximaal ${h} uur duren.`,
+      outdoor: "Buiten", advice: "Beste keuze", never: "lukt niet",
+      verdictNever: "Beide tegelijk is nooit nodig: één bron is altijd op tijd en goedkoper.",
+      verdictBelow: (t) => `Beide tegelijk loont alleen bij ${t} °C en kouder — niet omdat het per graad goedkoper is, maar omdat één bron alleen het niet op tijd haalt.`,
+      perDeg: "Per graad is beide tegelijk altijd een mix van de twee prijzen, dus nooit goedkoper dan de goedkoopste bron alleen. Het enige voordeel is snelheid.",
+      typical: "Het effect van de buitentemperatuur op de airco is nog niet zichtbaar in je data; er wordt een typische waarde (2% per °C) gebruikt.",
     },
     mode: "Modus", functions: "Functies", functionsText: "Optionele functies. Zet uit wat je niet wilt; Climator negeert het dan gewoon.",
     feat: {
@@ -1203,8 +1221,10 @@ class ClimatorPanel extends HTMLElement {
       <div class="card"><h2>${t.knowsTitle}</h2>${params}</div>
       <div class="card"><h2>${t.breakevenTitle}</h2>
         <div class="sub">${beText} (${t.strategy.airco} ${this._eur(caNow, 3)}/°C · ${t.strategy.cv} ${this._eur(ccNow, 3)}/°C ${t.nowWord})</div>
+        ${m.ga1_typical ? `<div class="sub warnc">ⓘ ${t.both.typical}</div>` : ""}
         <div class="legend"><span class="band-key"><i class="line" style="--c:${COLORS.airco}"></i>${t.strategy.airco}</span><span class="band-key"><i class="line" style="--c:${COLORS.cv}"></i>${t.strategy.cv}</span></div>
         <div class="chart" data-chart="breakeven"></div></div>
+      ${this._bothCard()}
       ${this._historyCard()}
       ${this._exploreCard()}
       <div class="two">
@@ -1218,6 +1238,26 @@ class ClimatorPanel extends HTMLElement {
           <div class="resets">${Object.entries(t.scopes).map(([k, v]) => `<button class="btn ${k === "all" ? "danger" : ""}" data-action="reset" data-value="${k}">${v}</button>`).join("")}</div>
         </div>
       </div>`;
+  }
+
+  _bothCard() {
+    const t = this.t, B = t.both, a = this._info?.both;
+    if (!a || !a.rows?.length) return "";
+    const u = this._hUnit;
+    const dur = (h) => h == null ? B.never : h >= 1 ? `${Math.floor(h)}${u} ${String(Math.round((h % 1) * 60)).padStart(2, "0")}m` : `${Math.round(h * 60)}m`;
+    const cell = (r, s) => {
+      const o = r.options[s];
+      if (!o || o.hours == null) return `<td class="muted">${B.never}</td>`;
+      const cls = r.advice === s ? "best" : !o.fits ? "slow" : "";
+      return `<td class="${cls}">${dur(o.hours)}<div class="sub">${this._eur(o.cost)}</div></td>`;
+    };
+    const rows = a.rows.map((r) => `<tr><td><b>${r.t_out} °C</b></td>${cell(r, "airco")}${cell(r, "cv")}${cell(r, "both")}
+      <td>${r.advice ? this._chip(r.advice) : "–"}</td></tr>`).join("");
+    const verdict = a.both_needed_below == null ? B.verdictNever : B.verdictBelow(a.both_needed_below);
+    return `<div class="card"><h2>⚡ ${B.title}</h2>
+      <div class="muted">${B.text(this._fmt(a.low, 1), this._fmt(a.high, 1), this._fmt(a.max_preheat_h, 1))}</div>
+      <div class="sbsum"><b>${esc(verdict)}</b> ${esc(B.perDeg)}</div>
+      <table class="tbl both"><thead><tr><th>${B.outdoor}</th><th>${t.strategy.airco}</th><th>${t.strategy.cv}</th><th>${t.strategy.both}</th><th>${B.advice}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
   _historyCard() {
@@ -1595,6 +1635,9 @@ select { padding:7px 10px; border-radius:8px; border:1px solid var(--divider-col
 .sbbar div { height:100%; background:#78909c; border-radius:6px; }
 .sbrow.chosen .sbbar div { background:#66bb6a; } .sbrow.chosen { font-weight:600; }
 .sbval { text-align:right; } .sbtag { color:var(--secondary-text-color); font-size:12px; }
+.tbl.both th { text-align:left; font-size:12px; color:var(--secondary-text-color); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--divider-color); }
+.tbl.both td.best { background:rgba(76,175,80,.14); font-weight:600; }
+.tbl.both td.slow { opacity:.55; }
 .histrow { display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin:12px 0 8px; }
 .banner.info { border-color:#42a5f5; background:rgba(66,165,245,.12); }
 .two.inner { gap:24px; }

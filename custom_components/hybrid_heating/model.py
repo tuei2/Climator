@@ -29,7 +29,11 @@ FORGET = 0.999          # per sample (15 min) -> half-life ~7 days
 SAMPLE_MINUTES = 15
 # Physical limits. A heat pump never gets *less* efficient when it is warmer outside
 # (ga1 >= 0), the sun never cools the room (gs >= 0) and every source adds heat.
-BOUNDS = {"k": (0.003, 0.5), "ga0": (0.05, 10.0), "ga1": (0.0, 0.15),
+# ga1 is limited relative to ga0: an air-to-air heat pump loses roughly 2-6 % of its output
+# per degree colder outside. When the data cannot show this (small outdoor range), the
+# typical lower value is used instead of a physically impossible flat or reversed curve.
+GA1_REL = (0.02, 0.06)
+BOUNDS = {"k": (0.003, 0.5), "ga0": (0.05, 10.0), "ga1": (0.0, 0.6),
           "gc": (0.05, 15.0), "gs": (0.0, 5.0), "gab": (-0.3, 3.0)}
 # parameters whose limit means the data is suspicious (others hitting a limit is normal)
 CRITICAL = ("k", "ga0", "gc")
@@ -116,6 +120,7 @@ class ThermalModel:
     theta: dict = field(default_factory=lambda: dict(PRIOR))
     clamped: list = field(default_factory=list)
     last_seen: dict = field(default_factory=dict)  # source -> unix time of last informative sample
+    ga1_typical: bool = False   # True when the outdoor-temperature effect uses the typical value
 
     def __post_init__(self) -> None:
         self.solve()
@@ -194,7 +199,15 @@ class ThermalModel:
         # consistently instead of compensating for an impossible value.
         fixed: dict[int, float] = {}
         sol = None
-        for _ in range(N + 1):
+        i_ga0, i_ga1 = PARAMS.index("ga0"), PARAMS.index("ga1")
+
+        def bounds(i, cur):
+            if i == i_ga1:
+                g0 = max(cur[i_ga0], BOUNDS["ga0"][0])
+                return GA1_REL[0] * g0, GA1_REL[1] * g0
+            return BOUNDS[PARAMS[i]]
+
+        for _ in range(N + 6):
             free = [i for i in range(N) if i not in fixed]
             ar = [[a[i][j] for j in free] for i in free]
             br = [b[i] - sum(a[i][j] * v for j, v in fixed.items()) for i in free]
@@ -209,16 +222,24 @@ class ThermalModel:
                 sol[i] = part[idx]
             worst, dist = None, 0.0
             for i in free:
-                lo, hi = BOUNDS[PARAMS[i]]
+                lo, hi = bounds(i, sol)
                 d = (lo - sol[i]) if sol[i] < lo else (sol[i] - hi) if sol[i] > hi else 0.0
                 if d > dist:
                     worst, dist = i, d
             if worst is None:
+                # ga1 fixed relative to ga0: follow ga0 if it moved after fixing
+                if i_ga1 in fixed:
+                    lo, hi = bounds(i_ga1, sol)
+                    want = lo if fixed[i_ga1] <= lo * 1.5 else hi
+                    if abs(want - fixed[i_ga1]) > 1e-4:
+                        fixed[i_ga1] = want
+                        continue
                 break
-            lo, hi = BOUNDS[PARAMS[worst]]
+            lo, hi = bounds(worst, sol)
             fixed[worst] = lo if sol[worst] < lo else hi
         self.clamped = [PARAMS[i] for i in fixed]
         self.theta = {p: min(BOUNDS[p][1], max(BOUNDS[p][0], v)) for p, v in zip(PARAMS, sol)}
+        self.ga1_typical = i_ga1 in fixed
         self._a_full = a
 
     def predict_slope(self, s: Sample) -> float:
